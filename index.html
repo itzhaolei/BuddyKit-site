@@ -12,6 +12,8 @@
     <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&family=Noto+Sans+SC:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="styles.css" />
     <link rel="stylesheet" href="animations.css" />
+    <link rel="stylesheet" href="real-stats.css" />
+    <link rel="stylesheet" href="real-account.css" />
   </head>
   <body>
     <div class="noise" aria-hidden="true"></div>
@@ -91,7 +93,28 @@
 
       <section class="interface-section shell" id="preview">
         <div class="section-kicker">THE INTERFACE</div>
-        <div class="interface-heading"><h2>真实功能，<span>真实元素。</span></h2><p>下面的内容与桌面程序中的账号页和统计页保持一致，展示的是 BuddyKit 已实现的交互，不是概念图。</p></div>
+        <div class="interface-heading"><h2>真实功能，<span>真实元素。</span></h2><p>下面的统计页按 BuddyKit v0.1.0 的真实界面还原，公开预览不上传本机用量，安装后由程序读取本地数据。</p></div>
+        <div class="real-stats-preview" aria-label="BuddyKit 统计页真实界面">
+          <div class="real-stats-header">
+            <div class="real-stats-heading"><span class="real-stats-icon">◔</span><div><h3>统计</h3><p>本机记录会随 WorkBuddy 的使用情况自动更新。</p></div></div>
+          </div>
+          <div class="real-usage-card real-usage-credits">
+            <div class="real-usage-head"><div class="real-usage-name"><span>ϟ</span><b>积分</b></div><span>最高单日 暂无记录</span></div>
+            <div class="real-usage-body">
+              <div class="real-summary-grid"><div><span>今日</span><b>0</b><i></i></div><div><span>昨日</span><b>0</b><i></i></div><div><span>本月</span><b>0</b><i></i></div><div><span>今年</span><b>0</b><i></i></div></div>
+              <div class="real-usage-divider"></div>
+              <div class="real-calendar"><div class="real-month-nav"><button aria-label="上个月">‹</button><b>2026年9月</b><button aria-label="下个月">›</button></div><div class="real-weekdays"><span>一</span><span>二</span><span>三</span><span>四</span><span>五</span><span>六</span><span>日</span></div><div class="real-days real-credit-days"><i class="empty"></i><i class="empty"></i><i data-day="1">1</i><i data-day="2">2</i><i data-day="3">3</i><i data-day="4">4</i><i data-day="5">5</i><i data-day="6">6</i><i data-day="7">7</i><i data-day="8">8</i><i data-day="9">9</i><i data-day="10">10</i><i data-day="11">11</i><i data-day="12">12</i><i data-day="13">13</i><i data-day="14">14</i><i data-day="15">15</i><i data-day="16">16</i><i data-day="17">17</i><i data-day="18">18</i><i data-day="19">19</i><i data-day="20">20</i><i data-day="21">21</i><i data-day="22">22</i><i data-day="23">23</i><i data-day="24">24</i><i data-day="25">25</i><i data-day="26">26</i><i data-day="27">27</i><i class="muted" data-day="28">28</i><i class="muted" data-day="29">29</i><i class="muted" data-day="30">30</i></div></div>
+            </div>
+          </div>
+          <div class="real-usage-card real-usage-tokens">
+            <div class="real-usage-head"><div class="real-usage-name"><span>◇</span><b>Token</b></div><span>最高单日 暂无记录</span></div>
+            <div class="real-usage-body">
+              <div class="real-summary-grid"><div><span>今日</span><b>0</b><i></i></div><div><span>昨日</span><b>0</b><i></i></div><div><span>本月</span><b>0</b><i></i></div><div><span>今年</span><b>0</b><i></i></div></div>
+              <div class="real-usage-divider"></div>
+              <div class="real-calendar"><div class="real-month-nav"><button aria-label="上个月">‹</button><b>2026年9月</b><button aria-label="下个月">›</button></div><div class="real-weekdays"><span>一</span><span>二</span><span>三</span><span>四</span><span>五</span><span>六</span><span>日</span></div><div class="real-days real-token-days"><i class="empty"></i><i class="empty"></i><i data-day="1">1</i><i data-day="2">2</i><i data-day="3">3</i><i data-day="4">4</i><i data-day="5">5</i><i data-day="6">6</i><i data-day="7">7</i><i data-day="8">8</i><i data-day="9">9</i><i data-day="10">10</i><i data-day="11">11</i><i data-day="12">12</i><i data-day="13">13</i><i data-day="14">14</i><i data-day="15">15</i><i data-day="16">16</i><i data-day="17">17</i><i data-day="18">18</i><i data-day="19">19</i><i data-day="20">20</i><i data-day="21">21</i><i data-day="22">22</i><i data-day="23">23</i><i data-day="24">24</i><i data-day="25">25</i><i data-day="26">26</i><i data-day="27">27</i><i class="muted" data-day="28">28</i><i class="muted" data-day="29">29</i><i class="muted" data-day="30">30</i></div></div>
+            </div>
+          </div>
+        </div>
         <div class="stats-preview">
           <div class="stats-sidebar"><div class="stats-brand"><img src="assets/buddykit_icon.svg" alt="" /><b>BuddyKit</b></div><div class="stats-nav">♙&nbsp;&nbsp;账号</div><div class="stats-nav selected">▥&nbsp;&nbsp;统计</div><div class="stats-build">v0.1.0</div></div>
           <div class="stats-main"><div class="stats-title-row"><div><div class="stats-title"><span class="stats-title-icon">▥</span><h3>统计</h3></div><p>积分和 Token 的本地用量趋势。</p></div><span class="stats-period">按最后归属统计</span></div><div class="stat-cards"><div class="stat-summary credit-summary"><div class="summary-top"><span>积分</span><b>1,526</b></div><div class="summary-periods"><span>今日 <b>400</b></span><span>昨日 <b>200</b></span><span>本周 <b>1,200</b></span><span>本月 <b>4,860</b></span></div></div><div class="stat-summary token-summary"><div class="summary-top"><span>Token</span><b>12.4K</b></div><div class="summary-periods"><span>今日 <b>8.2K</b></span><span>昨日 <b>1.2K</b></span><span>本周 <b>12.4K</b></span><span>本月 <b>38.7K</b></span></div></div></div><div class="board-head"><h4>每日用量</h4><div class="month-nav"><button aria-label="上个月">‹</button><span>2026 年 09 月</span><button aria-label="下个月">›</button></div></div><div class="calendar"><div class="weekdays"><span>一</span><span>二</span><span>三</span><span>四</span><span>五</span><span>六</span><span>日</span></div><div class="days"><i></i><i></i><i class="level-1"></i><i class="level-3"></i><i class="level-2"></i><i class="level-4"></i><i class="level-1"></i><i class="level-2"></i><i class="level-4"></i><i class="level-3"></i><i></i><i class="level-1"></i><i class="level-2"></i><i class="level-3"></i><i class="level-4"></i><i></i><i class="level-2"></i><i class="level-1"></i><i class="level-3"></i><i class="level-4"></i><i class="level-2"></i><i class="level-1"></i><i></i><i class="level-3"></i><i class="level-4"></i><i class="level-1"></i><i class="level-2"></i><i></i><i class="level-3"></i><i class="level-4"></i><i class="level-2"></i><i class="level-1"></i><i class="level-4"></i><i class="level-3"></i><i></i><i class="level-2"></i><i class="level-4"></i><i class="level-1"></i><i class="level-3"></i><i class="level-2"></i><i></i><i class="level-4"></i><i class="level-2"></i><i class="level-3"></i><i class="level-1"></i><i class="level-4"></i><i class="level-2"></i><i></i><i class="level-3"></i><i class="level-1"></i><i class="level-4"></i><i class="level-2"></i><i class="level-3"></i><i></i><i class="level-1"></i><i class="level-4"></i><i class="level-2"></i><i class="level-3"></i><i class="level-1"></i><i class="level-4"></i><i class="level-2"></i><i class="level-3"></i><i class="level-1"></i><i class="level-4"></i><i class="level-2"></i><i class="level-3"></i><i class="level-1"></i><i class="level-4"></i><i class="level-2"></i><i class="level-3"></i><i class="level-1"></i><i class="level-4"></i><i class="level-2"></i><i class="level-3"></i><i class="level-1"></i><i class="level-4"></i><i class="level-2"></i><i class="level-3"></i></div><div class="board-peak">最高单日 <b>1,526</b></div></div></div>
