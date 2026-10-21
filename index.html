@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="theme-color" content="#0d1218" />
-    <meta name="description" content="BuddyKit：为 WorkBuddy 设计的本地账号切换工具。保存多个登录状态，点击卡片切换账号，本地会话跟随当前账号。" />
+    <meta name="description" content="BuddyKit：为 WorkBuddy 设计的桌面账号工具。保存多个登录状态，一键切换账号，每天自动领取加油站积分；关闭窗口后继续在后台运行。" />
     <title>BuddyKit · WorkBuddy 账号切换</title>
     <link rel="icon" href="assets/buddykit_icon.svg" type="image/svg+xml" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -34,12 +34,12 @@
         <div class="hero-copy">
           <p class="eyebrow"><span class="pulse-dot"></span> WORKBUDDY DESKTOP COMPANION</p>
           <h1>切换账号，<br /><em>只需要一张卡片。</em></h1>
-          <p class="hero-lede">BuddyKit 是一个简洁的本地桌面工具。保存多个 WorkBuddy 登录状态，点击账号卡片切换；本地会话归属跟随当前账号，云端会话保持不动。</p>
+          <p class="hero-lede">保存多个 WorkBuddy 登录状态，点击账号卡片切换，每天自动领取加油站积分。本地会话归属跟随当前账号，云端会话保持不动。</p>
           <div class="hero-actions">
             <a class="button button-primary" href="#download">获取 BuddyKit <span>↗</span></a>
             <a class="button button-quiet" href="#preview">查看真实界面 <span>↓</span></a>
           </div>
-          <p class="hero-note"><span class="mono">v0.1.0 · macOS · Windows</span><span class="separator">/</span>本地运行，不启动本地服务</p>
+          <p class="hero-note"><span class="mono">v0.2.0 · macOS · Windows</span><span class="separator">/</span>本地运行，不启动本地服务</p>
         </div>
         <figure class="hero-art product-capture">
           <a class="capture-link" href="assets/accounts-screen.png" target="_blank" rel="noreferrer" aria-label="放大 BuddyKit 账号页截图">
@@ -53,17 +53,19 @@
         <div><span class="proof-number">01</span><span>保存多个账号</span></div>
         <div><span class="proof-number">02</span><span>一键重启切换</span></div>
         <div><span class="proof-number">03</span><span>本地会话原地归属</span></div>
-        <div><span class="proof-number">04</span><span>积分与 Token 统计</span></div>
+        <div><span class="proof-number">04</span><span>每日加油站自动领取</span></div>
       </section>
 
       <section class="intro shell" id="features">
         <div class="section-kicker">BUILT AROUND THE THINGS YOU ACTUALLY DO</div>
-        <div class="intro-grid"><h2>少一点管理，<br /><span>多一点专注。</span></h2><p>BuddyKit 只保留账号切换真正需要的部分：浏览器 OAuth 授权、账号卡片、稳定的本地会话归属和清晰的用量统计。没有设置页，没有会话管理页，也不启动本地 HTTP/WebSocket 服务。</p></div>
+        <div class="intro-grid"><h2>少一点管理，<br /><span>多一点专注。</span></h2><p>浏览器 OAuth 授权、账号卡片、本地会话归属和用量统计，加上每日积分自动领取。关闭窗口后继续在后台运行；明确退出 BuddyKit 后停止领取。</p></div>
         <div class="feature-grid">
           <article class="feature-card feature-wide"><div class="feature-index">01 / ACCOUNT SWITCHING</div><div class="feature-icon icon-stack">◎</div><h3>账号卡片，一眼识别</h3><p>昵称、账号类型、订阅类型和剩余积分都来自 WorkBuddy 当前数据。卡片配色按账号固定，下次启动仍然保持一致。</p><div class="feature-tags"><span>Personal</span><span>Free</span><span>剩余积分</span></div></article>
           <article class="feature-card feature-teal"><div class="feature-index">02 / SESSION OWNERSHIP</div><div class="feature-icon">↗</div><h3>本地会话跟随切换</h3><p>切换时 WorkBuddy 会被可靠地重启，本地会话原地归属到目标账号；云端会话不被复制、不被改动。</p><div class="session-line"><span class="line-dot"></span><span>local sessions</span><b>→</b><span class="line-dot target"></span><span>selected account</span></div></article>
           <article class="feature-card feature-yellow"><div class="feature-index">03 / USAGE INSIGHT</div><div class="feature-icon">▦</div><h3>积分与 Token，看得明白</h3><p>每日看板展示真实的积分和 Token 用量，可悬浮查看某一天的精确数量，并支持切换月份。</p><div class="feature-tags"><span>今日</span><span>昨日</span><span>本月</span><span>今年</span></div></article>
           <article class="feature-card feature-purple"><div class="feature-index">04 / BROWSER OAUTH</div><div class="feature-icon">↗</div><h3>官方浏览器授权</h3><p>点击“添加账号”后唤起 WorkBuddy 官方授权页。验证完成，BuddyKit 读取账号信息并生成卡片，不需要手动输入账号名。</p><div class="oauth-flow"><span>WorkBuddy</span><b>→</b><span>BuddyKit</span></div></article>
+          <article class="feature-card feature-teal"><div class="feature-index">05 / DAILY CREDITS</div><div class="feature-icon">＋</div><h3>每日加油站，自动领取</h3><p>为登录态有效的已授权账号每天领取加油站积分，并更新剩余积分。每个账号独立处理，卡片显示领取状态，无需来回切换 WorkBuddy。</p><div class="feature-tags"><span>每天自动领取</span><span>领取状态可见</span></div></article>
+          <article class="feature-card feature-wide"><div class="feature-index">06 / BACKGROUND RUNNING</div><div class="feature-icon">◉</div><h3>关掉窗口，继续代领</h3><p>点击红色关闭按钮后隐藏到后台，可从菜单栏、系统托盘或 macOS Dock 重新打开。选择“退出 BuddyKit”后停止领取，不创建系统任务，也不开机自启。</p><div class="feature-tags"><span>关闭窗口继续运行</span><span>退出即停止</span></div></article>
         </div>
       </section>
 
@@ -81,12 +83,12 @@
         </figure>
       </section>
 
-      <section class="safety shell" id="safety"><div class="safety-copy"><div class="section-kicker">LOCAL BY DEFAULT</div><h2>你的登录状态，<br /><span>留在你的电脑上。</span></h2><p>账号快照在本地以 AES-GCM 加密保存。BuddyKit 不使用系统钥匙串，不启动本地服务，不上传账号列表；授权环节由 WorkBuddy 官方浏览器页面完成。</p><a class="text-link" href="https://github.com/itzhaolei/BuddyKit" target="_blank" rel="noreferrer">了解项目结构 <span>↗</span></a></div><div class="safety-list"><div><span>01</span><b>不复制云端会话</b><p>本地会话原地更新归属，云端内容保持不动。</p></div><div><span>02</span><b>不访问系统 Keychain</b><p>密钥存于 BuddyKit 私有应用数据目录。</p></div><div><span>03</span><b>切换后可靠重启</b><p>WorkBuddy 重启后再应用新的登录状态。</p></div></div></section>
+      <section class="safety shell" id="safety"><div class="safety-copy"><div class="section-kicker">LOCAL BY DEFAULT</div><h2>你的登录状态，<br /><span>留在你的电脑上。</span></h2><p>账号快照在本地以 AES-GCM 加密保存。BuddyKit 不使用系统钥匙串，不启动本地服务，不上传账号列表；通过 WorkBuddy 官方页面授权，并使用官方接口查询与领取积分。</p><a class="text-link" href="https://www.workbuddy.cn" target="_blank" rel="noreferrer">前往 WorkBuddy 官网 <span>↗</span></a></div><div class="safety-list"><div><span>01</span><b>不复制云端会话</b><p>本地会话原地更新归属，云端内容保持不动。</p></div><div><span>02</span><b>不访问系统 Keychain</b><p>密钥存于 BuddyKit 私有应用数据目录。</p></div><div><span>03</span><b>切换后可靠重启</b><p>WorkBuddy 重启后再应用新的登录状态。</p></div></div></section>
 
-      <section class="download-section shell" id="download"><div class="download-panel"><div><div class="section-kicker">DOWNLOAD BUDDYKIT</div><h2>把切换账号<br /><span>变成一个动作。</span></h2><p>当前版本 <span class="mono">v0.1.0</span> · macOS 和 Windows</p></div><div class="download-actions"><a class="download-card" href="downloads/BuddyKit-0.1.0.dmg"><div class="download-os"> <span>macOS</span></div><b>下载 DMG</b><small>拖入 Applications 安装</small><span class="download-arrow">↗</span></a><a class="download-card" href="downloads/BuddyKit-0.1.0-Setup.exe"><div class="download-os">⊞ <span>Windows</span></div><b>下载安装程序</b><small>自动创建桌面快捷方式</small><span class="download-arrow">↗</span></a></div></div></section>
+      <section class="download-section shell" id="download"><div class="download-panel"><div><div class="section-kicker">DOWNLOAD BUDDYKIT</div><h2>把切换账号<br /><span>变成一个动作。</span></h2><p>当前版本 <span class="mono">v0.2.0</span> · macOS 和 Windows</p><p>macOS 包暂未公证，首次打开可能需系统确认。</p></div><div class="download-actions"><a class="download-card" href="downloads/BuddyKit-0.2.0.dmg"><div class="download-os"> <span>macOS</span></div><b>下载 DMG</b><small>拖入 Applications 安装</small><span class="download-arrow">↗</span></a><a class="download-card" href="downloads/BuddyKit-0.2.0-Setup.exe"><div class="download-os">⊞ <span>Windows</span></div><b>下载安装程序</b><small>自动创建桌面快捷方式</small><span class="download-arrow">↗</span></a></div></div></section>
     </main>
 
-    <footer class="site-footer shell"><div class="footer-brand"><img src="assets/buddykit_icon.svg" alt="" /><span>BuddyKit</span></div><p>WorkBuddy 的本地账号切换工具。</p><div class="footer-links"><a href="https://github.com/itzhaolei/BuddyKit" target="_blank" rel="noreferrer">GitHub</a><a href="https://www.workbuddy.cn" target="_blank" rel="noreferrer">WorkBuddy 官网</a><span>MIT License</span></div></footer>
+    <footer class="site-footer shell"><div class="footer-brand"><img src="assets/buddykit_icon.svg" alt="" /><span>BuddyKit</span></div><p>WorkBuddy 的本地桌面账号工具。</p><div class="footer-links"><a href="https://github.com/itzhaolei/BuddyKit-site" target="_blank" rel="noreferrer">GitHub</a><a href="https://www.workbuddy.cn" target="_blank" rel="noreferrer">WorkBuddy 官网</a><span>MIT License</span></div></footer>
     <script src="script.js?v=flutter-captures"></script>
   </body>
 </html>
