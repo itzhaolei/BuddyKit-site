@@ -1,0 +1,2 @@
+aaec953de48a41f8dcf011ec4bc095268267a07f404fae42222b75c4fbec008e  BuddyKit-0.2.3-notarized.dmg
+446ffca169822d141062f20cb27ee8d3a06eead419972c3782c336254f6f90b8  BuddyKit-0.2.3-Setup.exe
