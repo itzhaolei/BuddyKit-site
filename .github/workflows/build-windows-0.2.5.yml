@@ -48,7 +48,7 @@ jobs:
           source = Path(os.environ['RUNNER_TEMP']) / 'buddykit-private-source'
           source.mkdir()
           plaintext = SecretBox(key).decrypt(encrypted)
-          expected = '80e9f191badd0b78af2804945b419e4e5b3fa7980bde2b9418377fe71b08b949'
+          expected = '01c5b2250c784c48353a2278d4815b46a02125fa6faa610617f8ea93360d3d9e'
           if hashlib.sha256(plaintext).hexdigest() != expected:
               raise RuntimeError('Build input checksum does not match the approved source')
           archive.write_bytes(plaintext)
