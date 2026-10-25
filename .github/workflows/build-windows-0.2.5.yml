@@ -48,7 +48,7 @@ jobs:
           source = Path(os.environ['RUNNER_TEMP']) / 'buddykit-private-source'
           source.mkdir()
           plaintext = SecretBox(key).decrypt(encrypted)
-          expected = '06a66250b79fb5bac616033cd342fc3f3adecd433532861aff89ed421c5a5689'
+          expected = '80e9f191badd0b78af2804945b419e4e5b3fa7980bde2b9418377fe71b08b949'
           if hashlib.sha256(plaintext).hexdigest() != expected:
               raise RuntimeError('Build input checksum does not match the approved source')
           archive.write_bytes(plaintext)
@@ -95,11 +95,6 @@ jobs:
             throw 'Windows executable does not have the expected 0.2.5 version'
           }
 
-      - name: Verify single-instance window lifecycle
-        working-directory: ${{ runner.temp }}/buddykit-private-source
-        run: |
-          ./scripts/test_windows_single_instance.ps1 -ExecutablePath (Resolve-Path app/build/windows/x64/runner/Release/buddykit.exe).Path
-
       - name: Verify version label in the Windows app
         shell: powershell
         working-directory: ${{ runner.temp }}/buddykit-private-source
@@ -114,6 +109,11 @@ jobs:
           path: ${{ runner.temp }}/buddykit-version-evidence/
           if-no-files-found: ignore
           retention-days: 3
+
+      - name: Verify single-instance window lifecycle
+        working-directory: ${{ runner.temp }}/buddykit-private-source
+        run: |
+          ./scripts/test_windows_single_instance.ps1 -ExecutablePath (Resolve-Path app/build/windows/x64/runner/Release/buddykit.exe).Path
 
       - name: Build installer with Inno Setup
         working-directory: ${{ runner.temp }}/buddykit-private-source
