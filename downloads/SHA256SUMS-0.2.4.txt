@@ -1,0 +1,1 @@
+5c5e24b0e00f9205ade6ef62ce3f85daaa134fe3c6e708885c4152570c40c234  BuddyKit-0.2.4-Setup.exe
