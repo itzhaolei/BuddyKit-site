@@ -1,0 +1,145 @@
+name: Verify BuddyKit Windows 0.3.2 automatic update
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  real-auto-update:
+    runs-on: windows-latest
+    timeout-minutes: 18
+    defaults:
+      run:
+        shell: powershell
+    steps:
+      - name: Check out encrypted test input
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install decryption dependency
+        run: python -m pip install --disable-pip-version-check --no-cache-dir PyNaCl==1.6.2
+
+      - name: Decrypt source into temporary build directory
+        env:
+          BUDDYKIT_BUILD_KEY: ${{ secrets.BUDDYKIT_BUILD_KEY }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          @'
+          import base64
+          import hashlib
+          import os
+          from pathlib import Path
+          import tarfile
+          from nacl.secret import SecretBox
+
+          key = base64.b64decode(os.environ['BUDDYKIT_BUILD_KEY'], validate=True)
+          if len(key) != SecretBox.KEY_SIZE:
+              raise RuntimeError('Invalid build decryption key length')
+          encrypted = Path('.github/release-inputs/BuddyKit-0.3.2.tar.enc').read_bytes()
+          archive = Path(os.environ['RUNNER_TEMP']) / 'BuddyKit-0.3.2-source.tar.gz'
+          source = Path(os.environ['RUNNER_TEMP']) / 'buddykit-private-source'
+          source.mkdir()
+          plaintext = SecretBox(key).decrypt(encrypted)
+          expected = '83b473193b28f83ce68eb69b1a76011ac2350a235456d7cff9d12fdb34504522'
+          if hashlib.sha256(plaintext).hexdigest() != expected:
+              raise RuntimeError('Build input checksum does not match the approved source')
+          archive.write_bytes(plaintext)
+          del plaintext
+          del key, encrypted
+          with tarfile.open(archive, 'r:gz') as bundle:
+              bundle.extractall(source, filter='data')
+          archive.unlink()
+          '@ | python -
+          if ($LASTEXITCODE -ne 0) { throw 'Source decryption failed' }
+
+      - name: Download and verify the published Windows 0.3.1 installer
+        run: |
+          $ErrorActionPreference = 'Stop'
+          [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+          $directory = Join-Path $env:RUNNER_TEMP 'buddykit-published-baseline'
+          $null = New-Item -ItemType Directory -Path $directory
+          $installer = Join-Path $directory 'BuddyKit-0.3.1-Setup.exe'
+          Invoke-WebRequest -UseBasicParsing -Uri 'https://buddykit.maple.xin/downloads/BuddyKit-0.3.1-Setup.exe' -OutFile $installer
+          $expected = '39c8417f4d4332bba0d9604dce806146830e02b77c47905464ca566856cd82f6'
+          if ((Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash -ne $expected) { throw 'Published baseline installer checksum does not match the approved 0.3.1 release' }
+          Write-Output 'The published 0.3.1 installer matches its pinned SHA256.'
+
+      - name: Install the published baseline into an isolated runner directory
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $directory = Join-Path $env:RUNNER_TEMP 'buddykit-published-baseline'
+          $installer = Join-Path $directory 'BuddyKit-0.3.1-Setup.exe'
+          $baseline = Join-Path $directory 'installed app'
+          $log = Join-Path $directory 'baseline-install.log'
+          $arguments = '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP- /DIR="' + $baseline + '" /LOG="' + $log + '"'
+          $process = Start-Process -FilePath $installer -ArgumentList $arguments -PassThru
+          try {
+            $null = $process.Handle
+            if (-not $process.WaitForExit(120000)) { throw 'Published baseline installation exceeded two minutes' }
+            if ($process.ExitCode -ne 0) { throw "Published baseline installation failed (exit code $($process.ExitCode))" }
+          } finally { $process.Dispose() }
+          if ((Get-Item (Join-Path $baseline 'buddykit.exe')).VersionInfo.ProductVersion -ne '0.3.1+13') { throw 'Published baseline executable has the wrong version' }
+          foreach ($file in @('flutter_windows.dll', 'data/flutter_assets/assets/tray_icon.ico')) {
+            if (-not (Test-Path -LiteralPath (Join-Path $baseline $file))) { throw "Incomplete published baseline: $file" }
+          }
+
+      - name: Exercise the published 0.3.1 to 0.3.2 upgrade through the rendered button
+        working-directory: ${{ runner.temp }}/buddykit-private-source
+        run: |
+          ./scripts/test_windows_auto_update.ps1 -BaselineDirectory (Join-Path $env:RUNNER_TEMP 'buddykit-published-baseline/installed app') -BaselineVersion '0.3.1' -BaselineBuild 13 -ExpectedVersion '0.3.2' -ExpectedBuild 14 -EvidenceDirectory (Join-Path $env:RUNNER_TEMP 'buddykit-auto-update-evidence')
+
+      - name: Upload update screenshots and result evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: BuddyKit-windows-auto-update-evidence-0.3.2
+          path: ${{ runner.temp }}/buddykit-auto-update-evidence/
+          if-no-files-found: ignore
+          retention-days: 3
+
+      - name: Collect updater failure diagnostics
+        if: failure()
+        run: |
+          $updateRoot = Join-Path ([IO.Path]::GetTempPath()) 'BuddyKit/Updates'
+          $destination = Join-Path $env:RUNNER_TEMP 'buddykit-auto-update-diagnostics'
+          $baselineLog = Join-Path $env:RUNNER_TEMP 'buddykit-published-baseline/baseline-install.log'
+          if (Test-Path -LiteralPath $baselineLog -PathType Leaf) {
+            $null = New-Item -ItemType Directory -Path $destination -Force
+            Copy-Item -LiteralPath $baselineLog -Destination (Join-Path $destination 'baseline-install.log')
+          }
+          if (Test-Path -LiteralPath $updateRoot -PathType Container) {
+            foreach ($run in @(Get-ChildItem -LiteralPath $updateRoot -Directory -Filter 'run-*')) {
+              foreach ($name in @('diagnostic.log', 'installer.log')) {
+                $log = Join-Path $run.FullName $name
+                if (Test-Path -LiteralPath $log -PathType Leaf) {
+                  $folder = Join-Path $destination $run.Name
+                  $null = New-Item -ItemType Directory -Path $folder -Force
+                  Copy-Item -LiteralPath $log -Destination (Join-Path $folder $name)
+                }
+              }
+            }
+          }
+
+      - name: Upload failure diagnostics only
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: BuddyKit-windows-auto-update-diagnostics-0.3.2
+          path: ${{ runner.temp }}/buddykit-auto-update-diagnostics/
+          if-no-files-found: ignore
+          retention-days: 3
+
+      - name: Remove decrypted test input
+        if: always()
+        run: |
+          Remove-Item -LiteralPath (Join-Path $env:RUNNER_TEMP 'buddykit-private-source') -Recurse -Force -ErrorAction SilentlyContinue
+          Remove-Item -LiteralPath (Join-Path $env:RUNNER_TEMP 'BuddyKit-0.3.2-source.tar.gz') -Force -ErrorAction SilentlyContinue
+          Remove-Item -LiteralPath (Join-Path $env:RUNNER_TEMP 'buddykit-published-baseline') -Recurse -Force -ErrorAction SilentlyContinue
