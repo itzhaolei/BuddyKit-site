@@ -1,0 +1,83 @@
+name: Diagnose BuddyKit Windows 0.3.2
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-diagnostic:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Check out encrypted build input
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install decryption dependency
+        run: python -m pip install --disable-pip-version-check --no-cache-dir PyNaCl==1.6.2
+
+      - name: Decrypt source into temporary build directory
+        env:
+          BUDDYKIT_DIAGNOSTIC_KEY: ${{ secrets.BUDDYKIT_DIAGNOSTIC_KEY }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          @'
+          import base64
+          import hashlib
+          import os
+          from pathlib import Path
+          import tarfile
+          from nacl.secret import SecretBox
+
+          key = base64.b64decode(os.environ['BUDDYKIT_DIAGNOSTIC_KEY'], validate=True)
+          if len(key) != SecretBox.KEY_SIZE:
+              raise RuntimeError('Invalid build decryption key length')
+          encrypted = Path('.github/release-inputs/BuddyKit-0.3.2-diagnostic.tar.enc').read_bytes()
+          archive = Path(os.environ['RUNNER_TEMP']) / 'BuddyKit-0.3.2-source.tar.gz'
+          source = Path(os.environ['RUNNER_TEMP']) / 'buddykit-private-source'
+          source.mkdir()
+          plaintext = SecretBox(key).decrypt(encrypted)
+          expected = '8dfd34ec01c375a22406af8afd84ba68a2d8d95efe09f128a6177d71e56b9b5a'
+          if hashlib.sha256(plaintext).hexdigest() != expected:
+              raise RuntimeError('Build input checksum does not match the approved source')
+          archive.write_bytes(plaintext)
+          del plaintext
+          del key, encrypted
+          with tarfile.open(archive, 'r:gz') as bundle:
+              bundle.extractall(source, filter='data')
+          archive.unlink()
+          '@ | python -
+          if ($LASTEXITCODE -ne 0) { throw 'Source decryption failed' }
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.2'
+          channel: stable
+          cache: false
+
+      - name: Diagnose Windows account switch regression tests
+        working-directory: ${{ runner.temp }}/buddykit-private-source/app
+        run: |
+          $ErrorActionPreference = 'Stop'
+          flutter pub get
+          if ($LASTEXITCODE -ne 0) { throw 'Dependency resolution failed' }
+          flutter test test/services/account_switch_service_test.dart --reporter expanded
+          if ($LASTEXITCODE -ne 0) { throw 'Diagnostic regression tests failed' }
+
+      - name: Remove decrypted diagnostic source
+        if: always()
+        run: |
+          Remove-Item -LiteralPath (Join-Path $env:RUNNER_TEMP 'buddykit-private-source') -Recurse -Force -ErrorAction SilentlyContinue
+          Remove-Item -LiteralPath (Join-Path $env:RUNNER_TEMP 'BuddyKit-0.3.2-source.tar.gz') -Force -ErrorAction SilentlyContinue
