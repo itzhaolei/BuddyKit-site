@@ -1,0 +1,248 @@
+name: Build BuddyKit Windows 1.0.0
+run-name: BuddyKit Windows 1.0.0+24 encrypted input
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-installer:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: powershell
+    steps:
+      - name: Check out encrypted build input
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install authenticated decryption dependency
+        run: python -m pip install --disable-pip-version-check --no-cache-dir PyNaCl==1.6.2
+
+      - name: Decrypt exact frozen source in temporary directory
+        env:
+          BUDDYKIT_BUILD_KEY: ${{ secrets.BUDDYKIT_BUILD_KEY }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $diagnostics = Join-Path $env:RUNNER_TEMP 'buddykit-private-diagnostics'
+          $null = New-Item -ItemType Directory -Path $diagnostics
+          @'
+          import base64, hashlib, os, tarfile
+          from pathlib import Path, PurePosixPath
+          from nacl.secret import SecretBox
+          key = base64.b64decode(os.environ['BUDDYKIT_BUILD_KEY'], validate=True)
+          if len(key) != SecretBox.KEY_SIZE:
+              raise RuntimeError('Invalid decryption key length')
+          data = Path('.github/release-inputs/BuddyKit-1.0.0.tar.enc').read_bytes()
+          if hashlib.sha256(data).hexdigest() != '34f9dbc401dad89ebb0f89d5de653e2dc1cb871528535f6ff7d6d8a92c40803e':
+              raise RuntimeError('Encrypted input checksum mismatch')
+          plaintext = SecretBox(key).decrypt(data)
+          if hashlib.sha256(plaintext).hexdigest() != 'b5e0d36d8fc0f0406c054663239a9245035971a4fae7ed32c1f685df8b38c699':
+              raise RuntimeError('Frozen source archive checksum mismatch')
+          archive = Path(os.environ['RUNNER_TEMP']) / 'BuddyKit-1.0.0-source.tar.gz'
+          source = Path(os.environ['RUNNER_TEMP']) / 'buddykit-private-source'
+          source.mkdir()
+          archive.write_bytes(plaintext)
+          del plaintext, key, data
+          with tarfile.open(archive, 'r:gz') as bundle:
+              for member in bundle.getmembers():
+                  name = PurePosixPath(member.name)
+                  if name.is_absolute() or '..' in name.parts or not name.parts or name.parts[0] not in ('app', 'packaging', 'scripts'):
+                      raise RuntimeError('Unexpected source archive member')
+              bundle.extractall(source, filter='data')
+          archive.unlink()
+          '@ | python -
+          if ($LASTEXITCODE -ne 0) { throw 'Source decryption failed' }
+          Write-Output 'Frozen source decrypted and SHA256 verified.'
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.2'
+          channel: stable
+          cache: false
+
+      - name: Validate Windows PowerShell helper and native contracts
+        working-directory: ${{ runner.temp }}/buddykit-private-source
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $diagnostics = Join-Path $env:RUNNER_TEMP 'buddykit-private-diagnostics'
+          try {
+            & {
+              $source = Get-Content -Raw app/windows/runner/app_updater.cpp
+              $match = [regex]::Match($source, 'R"POWERSHELL\((.*?)\)POWERSHELL"', [System.Text.RegularExpressions.RegexOptions]::Singleline)
+              if (-not $match.Success) { throw 'Updater helper was not found' }
+              $tokens = $null
+              $errors = $null
+              $null = [System.Management.Automation.Language.Parser]::ParseInput($match.Groups[1].Value, [ref]$tokens, [ref]$errors)
+              if ($errors.Count -ne 0) { throw 'Embedded updater PowerShell parser failed' }
+              $csharp = [regex]::Match($match.Groups[1].Value, "Add-Type -TypeDefinition @'\r?\n(.*?)\r?\n'@", [System.Text.RegularExpressions.RegexOptions]::Singleline)
+              if (-not $csharp.Success) { throw 'Installer process helper was not found' }
+              Add-Type -TypeDefinition $csharp.Groups[1].Value
+              foreach ($script in @('scripts/test_windows_auto_update.ps1', 'scripts/test_windows_app_version.ps1', 'scripts/test_windows_single_instance.ps1', 'scripts/test_windows_workbuddy_task_contracts.ps1', 'scripts/test_windows_workbuddy_runtime.ps1')) {
+                $tokens = $null
+                $errors = $null
+                $null = [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $script).Path, [ref]$tokens, [ref]$errors)
+                if ($errors.Count -ne 0) { throw 'Windows PowerShell script parser failed' }
+              }
+            } *> (Join-Path $diagnostics 'powershell-validation.log')
+            $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'
+            $vcvars = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -find 'VC/Auxiliary/Build/vcvars64.bat' | Select-Object -First 1
+            if (-not $vcvars) { throw 'Visual Studio C++ toolchain unavailable' }
+            $runtimeEvidence = Join-Path $diagnostics 'native-runtime'
+            $taskEvidence = Join-Path $diagnostics 'native-task'
+            $runtimeScript = (Resolve-Path 'scripts/test_windows_workbuddy_runtime.ps1').Path
+            $taskScript = (Resolve-Path 'scripts/test_windows_workbuddy_task_contracts.ps1').Path
+            $batch = Join-Path $diagnostics 'run-native-contracts.cmd'
+            @"
+          @echo off
+          call "$vcvars" >nul
+          if errorlevel 1 exit /b 1
+          powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "$runtimeScript" -EvidenceDirectory "$runtimeEvidence"
+          if errorlevel 1 exit /b 1
+          powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "$taskScript" -EvidenceDirectory "$taskEvidence"
+          exit /b %errorlevel%
+          "@ | Set-Content -LiteralPath $batch -Encoding ASCII
+            & $env:ComSpec /d /c "`"$batch`"" *> (Join-Path $diagnostics 'native-contracts-output.log')
+            if ($LASTEXITCODE -ne 0) { throw 'Windows native contracts failed' }
+            $runtime = Get-Content -LiteralPath (Join-Path $runtimeEvidence 'result.json') -Raw | ConvertFrom-Json
+            if ($runtime.success -ne $true -or $runtime.realWorkBuddyAcceptance -ne $false) { throw 'Unexpected native runtime result' }
+            $taskResults = @(Get-ChildItem -LiteralPath $taskEvidence -Recurse -Filter result.json)
+            if ($taskResults.Count -ne 1) { throw 'Expected exactly one task contract result' }
+            $task = Get-Content -LiteralPath $taskResults[0].FullName -Raw | ConvertFrom-Json
+            if ($task.passed -ne $true -or $task.realWorkBuddyUIATested -ne $false) { throw 'Unexpected task contract result' }
+            @{ nativeRuntimeContracts = $true; taskPolicyContracts = $true; realWorkBuddyAcceptance = $false } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $diagnostics 'native-results.json') -Encoding ASCII
+          } catch {
+            $_ | Out-String | Add-Content -LiteralPath (Join-Path $diagnostics 'native-contracts-failure.log')
+            throw 'Native Windows validation failed; encrypted diagnostics will be retained.'
+          }
+          Write-Output 'PowerShell 5.1 validation and native fixture contracts passed; real WorkBuddy not tested.'
+
+      - name: Analyze test and build Windows release
+        working-directory: ${{ runner.temp }}/buddykit-private-source/app
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $diagnostics = Join-Path $env:RUNNER_TEMP 'buddykit-private-diagnostics'
+          flutter pub get *> (Join-Path $diagnostics 'flutter-pub-get.log')
+          if ($LASTEXITCODE -ne 0) { throw 'Dependency resolution failed; encrypted diagnostics retained.' }
+          flutter analyze *> (Join-Path $diagnostics 'flutter-analyze.log')
+          if ($LASTEXITCODE -ne 0) { throw 'Windows static analysis failed; encrypted diagnostics retained.' }
+          flutter test --reporter expanded *> (Join-Path $diagnostics 'flutter-tests.log')
+          if ($LASTEXITCODE -ne 0) { throw 'Windows tests failed; encrypted diagnostics retained.' }
+          flutter build windows --release --build-name=1.0.0 --build-number=24 *> (Join-Path $diagnostics 'flutter-build.log')
+          if ($LASTEXITCODE -ne 0) { throw 'Windows build failed; encrypted diagnostics retained.' }
+          $release = 'build/windows/x64/runner/Release'
+          foreach ($file in @('buddykit.exe', 'flutter_windows.dll', 'msvcp140.dll', 'vcruntime140.dll', 'vcruntime140_1.dll', 'data/flutter_assets/assets/tray_icon.ico')) {
+            if (-not (Test-Path -LiteralPath (Join-Path $release $file))) { throw 'Required bundle file is missing.' }
+          }
+          if ((Get-Item (Join-Path $release 'buddykit.exe')).VersionInfo.ProductVersion -ne '1.0.0+24') { throw 'Executable version mismatch.' }
+          Write-Output 'Windows analysis, full Dart suite and 1.0.0+24 release build passed.'
+
+      - name: Verify actual Windows version and single instance lifecycle
+        working-directory: ${{ runner.temp }}/buddykit-private-source
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $diagnostics = Join-Path $env:RUNNER_TEMP 'buddykit-private-diagnostics'
+          try {
+            ./scripts/test_windows_app_version.ps1 -ExecutablePath (Resolve-Path app/build/windows/x64/runner/Release/buddykit.exe).Path -EvidenceDirectory (Join-Path $env:RUNNER_TEMP 'buddykit-version-evidence') *> (Join-Path $diagnostics 'app-version.log')
+            ./scripts/test_windows_single_instance.ps1 -ExecutablePath (Resolve-Path app/build/windows/x64/runner/Release/buddykit.exe).Path *> (Join-Path $diagnostics 'single-instance.log')
+          } catch {
+            $_ | Out-String | Add-Content -LiteralPath (Join-Path $diagnostics 'app-lifecycle-failure.log')
+            throw 'Windows app lifecycle validation failed; encrypted diagnostics retained.'
+          }
+          Write-Output 'Rendered sidebar version and single-instance window/tray lifecycle verified.'
+
+      - name: Package installer and public build result
+        working-directory: ${{ runner.temp }}/buddykit-private-source
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $diagnostics = Join-Path $env:RUNNER_TEMP 'buddykit-private-diagnostics'
+          iscc '/DMyAppVersion=1.0.0' 'packaging/windows/BuddyKit.iss' *> (Join-Path $diagnostics 'installer-build.log')
+          if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath 'dist/BuddyKit-1.0.0-Setup.exe')) { throw 'Installer packaging failed; encrypted diagnostics retained.' }
+          $installer = Get-Item -LiteralPath 'dist/BuddyKit-1.0.0-Setup.exe'
+          $result = @{
+            version = '1.0.0'; build = 24; sourceCommit = 'f9f0c342136a0e261586c9295101b81c198edc20'; sourceArchiveSHA256 = 'b5e0d36d8fc0f0406c054663239a9245035971a4fae7ed32c1f685df8b38c699'; encryptedInputSHA256 = '34f9dbc401dad89ebb0f89d5de653e2dc1cb871528535f6ff7d6d8a92c40803e';
+            nativeRuntimeFixtureContracts = $true; nativeTaskPolicyContracts = $true; fullDartSuite = $true; staticAnalysis = $true; sidebarVersion = $true; singleInstance = $true;
+            realLoggedInWorkBuddyAcceptance = $false; installerSize = $installer.Length; installerSHA256 = (Get-FileHash -LiteralPath $installer.FullName -Algorithm SHA256).Hash.ToLowerInvariant();
+            workflowRun = $env:GITHUB_RUN_ID; workflowCommit = $env:GITHUB_SHA
+          }
+          $result | ConvertTo-Json | Set-Content -LiteralPath 'dist/windows-build-result.json' -Encoding ASCII
+          Write-Output 'Windows installer packaged and output checksum recorded.'
+
+      - name: Upload installer and reviewed build metadata only
+        uses: actions/upload-artifact@v4
+        with:
+          name: BuddyKit-windows-installer-1.0.0-build24
+          path: |
+            ${{ runner.temp }}/buddykit-private-source/dist/BuddyKit-1.0.0-Setup.exe
+            ${{ runner.temp }}/buddykit-private-source/dist/windows-build-result.json
+          if-no-files-found: error
+          retention-days: 3
+
+      - name: Upload synthetic sidebar version evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: BuddyKit-windows-version-evidence-1.0.0-build24
+          path: ${{ runner.temp }}/buddykit-version-evidence/
+          if-no-files-found: ignore
+          retention-days: 3
+
+      - name: Authenticated encryption of private diagnostics
+        if: always()
+        env:
+          BUDDYKIT_BUILD_KEY: ${{ secrets.BUDDYKIT_BUILD_KEY }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          @'
+          import base64, hashlib, io, json, os, tarfile
+          from pathlib import Path
+          from nacl.secret import SecretBox
+          diagnostics = Path(os.environ['RUNNER_TEMP']) / 'buddykit-private-diagnostics'
+          if not diagnostics.is_dir():
+              raise SystemExit(0)
+          output = Path(os.environ['RUNNER_TEMP']) / 'buddykit-encrypted-diagnostics'
+          output.mkdir()
+          stream = io.BytesIO()
+          with tarfile.open(fileobj=stream, mode='w:gz') as bundle:
+              for path in sorted(diagnostics.rglob('*')):
+                  if path.is_symlink():
+                      raise RuntimeError('Refusing linked diagnostics')
+                  if path.is_file():
+                      bundle.add(path, arcname=str(path.relative_to(diagnostics)), recursive=False)
+          plaintext = stream.getvalue()
+          key = base64.b64decode(os.environ['BUDDYKIT_BUILD_KEY'], validate=True)
+          if len(key) != SecretBox.KEY_SIZE:
+              raise RuntimeError('Invalid diagnostic encryption key')
+          encrypted = bytes(SecretBox(key).encrypt(plaintext))
+          (output / 'windows-diagnostics.tar.gz.enc').write_bytes(encrypted)
+          record = {'algorithm': 'XSalsa20-Poly1305 SecretBox', 'workflowRun': os.environ['GITHUB_RUN_ID'], 'workflowCommit': os.environ['GITHUB_SHA'], 'encryptedSHA256': hashlib.sha256(encrypted).hexdigest(), 'encryptedSize': len(encrypted), 'sourceArchiveSHA256': 'b5e0d36d8fc0f0406c054663239a9245035971a4fae7ed32c1f685df8b38c699'}
+          (output / 'encrypted-diagnostics.json').write_text(json.dumps(record, indent=2) + '\n')
+          del plaintext, key, encrypted
+          '@ | python -
+          if ($LASTEXITCODE -ne 0) { throw 'Diagnostic encryption failed; no plaintext diagnostic artifact will be uploaded.' }
+
+      - name: Upload encrypted diagnostics only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: BuddyKit-windows-encrypted-diagnostics-1.0.0-build24
+          path: ${{ runner.temp }}/buddykit-encrypted-diagnostics/
+          if-no-files-found: ignore
+          retention-days: 3
+
+      - name: Remove decrypted temporary source and diagnostics
+        if: always()
+        run: |
+          foreach ($name in @('buddykit-private-source', 'BuddyKit-1.0.0-source.tar.gz', 'buddykit-private-diagnostics')) {
+            Remove-Item -LiteralPath (Join-Path $env:RUNNER_TEMP $name) -Recurse -Force -ErrorAction SilentlyContinue
+          }
