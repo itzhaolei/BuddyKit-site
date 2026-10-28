@@ -15,9 +15,9 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 75
     env:
-      SOURCE_COMMIT: '757b2c779d11ce2d5bc3229b79657f46dbdd8f53'
-      BK_SOURCE_ARCHIVE_SHA256: 'ecf3e55656d3b7ce1dc50c9b5649155be17d45d4daede5d3e8e559b7f2b834d2'
-      BK_CIPHER_PATH: '.github/release-inputs/BuddyKit-1.0.0-36-757b2c7.tar.enc'
+      SOURCE_COMMIT: 'd9c652b35c474aabd99e6aa422e9e20d86c97b47'
+      BK_SOURCE_ARCHIVE_SHA256: 'a0139c21f636ec24181ef128cde374ea20a13a8750913d31168399f85c5f4158'
+      BK_CIPHER_PATH: '.github/release-inputs/BuddyKit-1.0.0-36-d9c652b.tar.enc'
     defaults:
       run:
         shell: powershell
@@ -34,7 +34,7 @@ jobs:
           }
           New-Item -ItemType Directory -Path $env:BK_EVIDENCE -Force | Out-Null
           if ($env:GITHUB_REPOSITORY -ne 'itzhaolei/BuddyKit-site') { throw 'Unexpected encrypted build repository.' }
-          if ($env:SOURCE_COMMIT -ne '757b2c779d11ce2d5bc3229b79657f46dbdd8f53') { throw 'Unexpected approved source identity.' }
+          if ($env:SOURCE_COMMIT -ne 'd9c652b35c474aabd99e6aa422e9e20d86c97b47') { throw 'Unexpected approved source identity.' }
           if ($env:BK_SOURCE_ARCHIVE_SHA256 -notmatch '^[0-9a-f]{64}$') { throw 'A frozen source archive checksum is required.' }
 
       - name: Check out encrypted input only
@@ -43,7 +43,7 @@ jobs:
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
-          sparse-checkout: .github/release-inputs/BuddyKit-1.0.0-36-757b2c7.tar.enc
+          sparse-checkout: .github/release-inputs/BuddyKit-1.0.0-36-d9c652b.tar.enc
           sparse-checkout-cone-mode: false
 
       - name: Set up Python for authenticated source and diagnostics
