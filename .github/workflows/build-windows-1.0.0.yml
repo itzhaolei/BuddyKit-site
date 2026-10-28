@@ -1,5 +1,5 @@
 name: Build BuddyKit Windows 1.0.0
-run-name: BuddyKit Windows 1.0.0+25 encrypted input
+run-name: BuddyKit Windows 1.0.0+26 encrypted input
 
 on:
   workflow_dispatch:
@@ -32,7 +32,7 @@ jobs:
       - name: Decrypt exact frozen source in temporary directory
         id: decrypt
         env:
-          BUDDYKIT_BUILD_KEY: ${{ secrets.BUDDYKIT_BUILD_KEY }}
+          BUDDYKIT_BUILD_KEY: ${{ secrets.BUDDYKIT_BUILD_KEY_26 }}
         run: |
           $ErrorActionPreference = 'Stop'
           $diagnostics = Join-Path $env:RUNNER_TEMP 'buddykit-private-diagnostics'
@@ -45,10 +45,10 @@ jobs:
           if len(key) != SecretBox.KEY_SIZE:
               raise RuntimeError('Invalid decryption key length')
           data = Path('.github/release-inputs/BuddyKit-1.0.0.tar.enc').read_bytes()
-          if hashlib.sha256(data).hexdigest() != '3f3186f50912b4c72571b919fb72bf703f3ff61a6b7d0b1d99198f73f74e12b3':
+          if hashlib.sha256(data).hexdigest() != '46c392df55f91b96ec561554bcdee1bde5e6201d03b20e24378cc0fa4bef9c57':
               raise RuntimeError('Encrypted input checksum mismatch')
           plaintext = SecretBox(key).decrypt(data)
-          if hashlib.sha256(plaintext).hexdigest() != '52a015e4ecd50060f74484eb47c78dabce049e612d96aa8c5978897ce8f59743':
+          if hashlib.sha256(plaintext).hexdigest() != '6828cbea39ea1ad7ba1f6a438e8fc2a539b6c8c43d0dbe466c8700be600e5e53':
               raise RuntimeError('Frozen source archive checksum mismatch')
           archive = Path(os.environ['RUNNER_TEMP']) / 'BuddyKit-1.0.0-source.tar.gz'
           source = Path(os.environ['RUNNER_TEMP']) / 'buddykit-private-source'
@@ -209,7 +209,7 @@ jobs:
           $diagnostics = Join-Path $env:RUNNER_TEMP 'buddykit-private-diagnostics'
           try {
             $taskLog = Join-Path $diagnostics 'flutter-build.log'
-            & $env:ComSpec /d /c ('flutter build windows --release --build-name=1.0.0 --build-number=25 > "' + $taskLog + '" 2>&1')
+            & $env:ComSpec /d /c ('flutter build windows --release --build-name=1.0.0 --build-number=26 > "' + $taskLog + '" 2>&1')
             if ($LASTEXITCODE -ne 0) { throw 'Command returned a failure exit code.' }
           } catch {
             $_ | Out-String | Add-Content -LiteralPath (Join-Path $diagnostics 'flutter-build-failure.log')
@@ -219,8 +219,8 @@ jobs:
           foreach ($file in @('buddykit.exe', 'flutter_windows.dll', 'msvcp140.dll', 'vcruntime140.dll', 'vcruntime140_1.dll', 'data/flutter_assets/assets/tray_icon.ico')) {
             if (-not (Test-Path -LiteralPath (Join-Path $release $file))) { throw 'Required bundle file is missing.' }
           }
-          if ((Get-Item (Join-Path $release 'buddykit.exe')).VersionInfo.ProductVersion -ne '1.0.0+25') { throw 'Executable version mismatch.' }
-          Write-Output 'Windows 1.0.0+25 release build passed.'
+          if ((Get-Item (Join-Path $release 'buddykit.exe')).VersionInfo.ProductVersion -ne '1.0.0+26') { throw 'Executable version mismatch.' }
+          Write-Output 'Windows 1.0.0+26 release build passed.'
 
       - name: Verify actual Windows version and single instance lifecycle
         id: app_lifecycle
@@ -263,7 +263,7 @@ jobs:
           if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath 'dist/BuddyKit-1.0.0-Setup.exe')) { throw 'Installer packaging failed; encrypted diagnostics retained.' }
           $installer = Get-Item -LiteralPath 'dist/BuddyKit-1.0.0-Setup.exe'
           $result = @{
-            version = '1.0.0'; build = 25; sourceCommit = 'a9031a6277e579787e4041efa809f33c8cf25b69'; sourceArchiveSHA256 = '52a015e4ecd50060f74484eb47c78dabce049e612d96aa8c5978897ce8f59743'; encryptedInputSHA256 = '3f3186f50912b4c72571b919fb72bf703f3ff61a6b7d0b1d99198f73f74e12b3';
+            version = '1.0.0'; build = 26; sourceCommit = '47e4ebae03f65b5c400e5a681ad047882ba94e2b'; sourceArchiveSHA256 = '6828cbea39ea1ad7ba1f6a438e8fc2a539b6c8c43d0dbe466c8700be600e5e53'; encryptedInputSHA256 = '46c392df55f91b96ec561554bcdee1bde5e6201d03b20e24378cc0fa4bef9c57';
             nativeRuntimeFixtureContracts = $true; nativeTaskPolicyContracts = $true; fullDartSuite = $true; staticAnalysis = $true; sidebarVersion = $true; singleInstance = $true;
             realLoggedInWorkBuddyAcceptance = $false; installerSize = $installer.Length; installerSHA256 = (Get-FileHash -LiteralPath $installer.FullName -Algorithm SHA256).Hash.ToLowerInvariant();
             workflowRun = $env:GITHUB_RUN_ID; workflowCommit = $env:GITHUB_SHA
@@ -275,7 +275,7 @@ jobs:
         if: success() && steps.validation_gate.outcome == 'success'
         uses: actions/upload-artifact@v4
         with:
-          name: BuddyKit-windows-installer-1.0.0-build25
+          name: BuddyKit-windows-installer-1.0.0-build26
           path: |
             ${{ runner.temp }}/buddykit-private-source/dist/BuddyKit-1.0.0-Setup.exe
             ${{ runner.temp }}/buddykit-private-source/dist/windows-build-result.json
@@ -286,7 +286,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: BuddyKit-windows-version-evidence-1.0.0-build25
+          name: BuddyKit-windows-version-evidence-1.0.0-build26
           path: ${{ runner.temp }}/buddykit-version-evidence/
           if-no-files-found: ignore
           retention-days: 3
@@ -294,7 +294,7 @@ jobs:
       - name: Authenticated encryption of private diagnostics
         if: always()
         env:
-          BUDDYKIT_BUILD_KEY: ${{ secrets.BUDDYKIT_BUILD_KEY }}
+          BUDDYKIT_BUILD_KEY: ${{ secrets.BUDDYKIT_BUILD_KEY_26 }}
         run: |
           $ErrorActionPreference = 'Stop'
           @'
@@ -319,7 +319,7 @@ jobs:
               raise RuntimeError('Invalid diagnostic encryption key')
           encrypted = bytes(SecretBox(key).encrypt(plaintext))
           (output / 'windows-diagnostics.tar.gz.enc').write_bytes(encrypted)
-          record = {'algorithm': 'XSalsa20-Poly1305 SecretBox', 'workflowRun': os.environ['GITHUB_RUN_ID'], 'workflowCommit': os.environ['GITHUB_SHA'], 'encryptedSHA256': hashlib.sha256(encrypted).hexdigest(), 'encryptedSize': len(encrypted), 'sourceArchiveSHA256': '52a015e4ecd50060f74484eb47c78dabce049e612d96aa8c5978897ce8f59743'}
+          record = {'algorithm': 'XSalsa20-Poly1305 SecretBox', 'workflowRun': os.environ['GITHUB_RUN_ID'], 'workflowCommit': os.environ['GITHUB_SHA'], 'encryptedSHA256': hashlib.sha256(encrypted).hexdigest(), 'encryptedSize': len(encrypted), 'sourceArchiveSHA256': '6828cbea39ea1ad7ba1f6a438e8fc2a539b6c8c43d0dbe466c8700be600e5e53'}
           (output / 'encrypted-diagnostics.json').write_text(json.dumps(record, indent=2) + '\n')
           del plaintext, key, encrypted
           '@ | python -
@@ -329,7 +329,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: BuddyKit-windows-encrypted-diagnostics-1.0.0-build25
+          name: BuddyKit-windows-encrypted-diagnostics-1.0.0-build26
           path: ${{ runner.temp }}/buddykit-encrypted-diagnostics/
           if-no-files-found: ignore
           retention-days: 3
