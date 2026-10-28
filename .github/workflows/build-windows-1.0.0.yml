@@ -157,7 +157,8 @@ jobs:
         run: |
           $diagnostics = Join-Path $env:RUNNER_TEMP 'buddykit-private-diagnostics'
           try {
-            flutter pub get *> (Join-Path $diagnostics 'flutter-pub-get.log')
+            $taskLog = Join-Path $diagnostics 'flutter-pub-get.log'
+            & $env:ComSpec /d /c ('flutter pub get > "' + $taskLog + '" 2>&1')
             if ($LASTEXITCODE -ne 0) { throw 'Command returned a failure exit code.' }
           } catch {
             $_ | Out-String | Add-Content -LiteralPath (Join-Path $diagnostics 'flutter-pub-get-failure.log')
@@ -173,7 +174,8 @@ jobs:
         run: |
           $diagnostics = Join-Path $env:RUNNER_TEMP 'buddykit-private-diagnostics'
           try {
-            flutter analyze *> (Join-Path $diagnostics 'flutter-analyze.log')
+            $taskLog = Join-Path $diagnostics 'flutter-analyze.log'
+            & $env:ComSpec /d /c ('flutter analyze > "' + $taskLog + '" 2>&1')
             if ($LASTEXITCODE -ne 0) { throw 'Command returned a failure exit code.' }
           } catch {
             $_ | Out-String | Add-Content -LiteralPath (Join-Path $diagnostics 'flutter-analyze-failure.log')
@@ -189,7 +191,8 @@ jobs:
         run: |
           $diagnostics = Join-Path $env:RUNNER_TEMP 'buddykit-private-diagnostics'
           try {
-            flutter test --reporter expanded *> (Join-Path $diagnostics 'flutter-tests.log')
+            $taskLog = Join-Path $diagnostics 'flutter-tests.log'
+            & $env:ComSpec /d /c ('flutter test --reporter expanded > "' + $taskLog + '" 2>&1')
             if ($LASTEXITCODE -ne 0) { throw 'Command returned a failure exit code.' }
           } catch {
             $_ | Out-String | Add-Content -LiteralPath (Join-Path $diagnostics 'flutter-tests-failure.log')
@@ -205,7 +208,8 @@ jobs:
         run: |
           $diagnostics = Join-Path $env:RUNNER_TEMP 'buddykit-private-diagnostics'
           try {
-            flutter build windows --release --build-name=1.0.0 --build-number=25 *> (Join-Path $diagnostics 'flutter-build.log')
+            $taskLog = Join-Path $diagnostics 'flutter-build.log'
+            & $env:ComSpec /d /c ('flutter build windows --release --build-name=1.0.0 --build-number=25 > "' + $taskLog + '" 2>&1')
             if ($LASTEXITCODE -ne 0) { throw 'Command returned a failure exit code.' }
           } catch {
             $_ | Out-String | Add-Content -LiteralPath (Join-Path $diagnostics 'flutter-build-failure.log')
