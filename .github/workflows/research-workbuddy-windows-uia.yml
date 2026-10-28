@@ -30,11 +30,11 @@ jobs:
           from pathlib import Path
           from nacl.secret import SecretBox
           encrypted = Path('.github/release-inputs/WorkBuddy-Windows-UIA-research.tar.enc').read_bytes()
-          if hashlib.sha256(encrypted).hexdigest() != '1c057f06930b7f5f65b7cb530eb6276486b593c34981b68dbe4bacb766dd0a13':
+          if hashlib.sha256(encrypted).hexdigest() != '8ac68061a4f7463b90d43d796cb197ec77f42254428deace592794b318c64825':
               raise RuntimeError('Research ciphertext mismatch')
           key = base64.b64decode(os.environ['BUDDYKIT_BUILD_KEY'], validate=True)
           plaintext = SecretBox(key).decrypt(encrypted)
-          if hashlib.sha256(plaintext).hexdigest() != '866f7ca02bab1967e12d245c5abdd73442e1a6fb09728da2f1f0c6474a627238':
+          if hashlib.sha256(plaintext).hexdigest() != 'a6a7c04f8d2ea2e91a176ce82af6dbc2c8f2a66615b41bc3b9b7b504c9c7d484':
               raise RuntimeError('Research source archive mismatch')
           wanted = {'scripts/research/test_windows_workbuddy_uia_provider.ps1', 'scripts/research/windows_workbuddy_uia_probe.cpp'}
           source = Path(os.environ['RUNNER_TEMP']) / 'buddykit-uia-research-source'
@@ -67,13 +67,24 @@ jobs:
             throw 'Read-only vendor UIA research did not complete; private diagnostics retained encrypted.'
           }
           Write-Output 'Read-only vendor UIA property research completed; no login, task action or hot-switch acceptance.'
+      - name: Collect safe stage metadata
+        if: always()
+        run: |
+          $stage = Join-Path $env:RUNNER_TEMP 'buddykit-uia-vendor-evidence/stage.json'
+          if (Test-Path -LiteralPath $stage) {
+            $public = Join-Path $env:RUNNER_TEMP 'buddykit-uia-safe-result'
+            $null = New-Item -ItemType Directory -Path $public -Force
+            $value = Get-Content -LiteralPath $stage -Raw | ConvertFrom-Json
+            $safe = @{ schemaVersion = 1; compiled = ($value.compiled -eq $true); downloadAttempts = [int]$value.downloadAttempts; installerValidated = ($value.installerValidated -eq $true); installed = ($value.installed -eq $true); probeStarted = ($value.probeStarted -eq $true); probeFinished = ($value.probeFinished -eq $true) }
+            $safe | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $public 'workbuddy-uia-stage.json') -Encoding ASCII
+          }
       - name: Upload reviewed metadata result only
-        if: success()
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: WorkBuddy-logged-out-UIA-safe-result
-          path: ${{ runner.temp }}/buddykit-uia-safe-result/workbuddy-uia-provider.json
-          if-no-files-found: error
+          path: ${{ runner.temp }}/buddykit-uia-safe-result/
+          if-no-files-found: ignore
           retention-days: 3
       - name: Encrypt private research diagnostics
         if: always()
@@ -88,7 +99,7 @@ jobs:
           evidence = root / 'buddykit-uia-vendor-evidence'
           files = [root / 'buddykit-uia-research-output.log']
           if evidence.is_dir():
-              files.extend(p for p in evidence.rglob('*') if p.is_file() and (p.name.endswith('.log') or p.name.endswith('.stderr.txt') or p.name.startswith('uia-sample-') and p.suffix == '.json'))
+              files.extend(p for p in evidence.rglob('*') if p.is_file() and (p.name.endswith('.log') or p.name.endswith('.stderr.txt') or p.name == 'stage.json' or p.name.startswith('uia-sample-') and p.suffix == '.json'))
           output = root / 'buddykit-uia-encrypted-diagnostics'
           output.mkdir()
           stream = io.BytesIO()
@@ -101,7 +112,7 @@ jobs:
           key = base64.b64decode(os.environ['BUDDYKIT_BUILD_KEY'], validate=True)
           encrypted = bytes(SecretBox(key).encrypt(stream.getvalue()))
           (output / 'research-diagnostics.tar.gz.enc').write_bytes(encrypted)
-          record = {'algorithm': 'XSalsa20-Poly1305 SecretBox', 'workflowRun': os.environ['GITHUB_RUN_ID'], 'workflowCommit': os.environ['GITHUB_SHA'], 'researchArchiveSHA256': '866f7ca02bab1967e12d245c5abdd73442e1a6fb09728da2f1f0c6474a627238', 'encryptedSHA256': hashlib.sha256(encrypted).hexdigest(), 'encryptedSize': len(encrypted)}
+          record = {'algorithm': 'XSalsa20-Poly1305 SecretBox', 'workflowRun': os.environ['GITHUB_RUN_ID'], 'workflowCommit': os.environ['GITHUB_SHA'], 'researchArchiveSHA256': 'a6a7c04f8d2ea2e91a176ce82af6dbc2c8f2a66615b41bc3b9b7b504c9c7d484', 'encryptedSHA256': hashlib.sha256(encrypted).hexdigest(), 'encryptedSize': len(encrypted)}
           (output / 'encrypted-diagnostics.json').write_text(json.dumps(record, indent=2) + '\n')
           del key, encrypted
           '@ | python -
