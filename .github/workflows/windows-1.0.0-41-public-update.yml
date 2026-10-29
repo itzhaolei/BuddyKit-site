@@ -1,0 +1,337 @@
+name: Verify official Windows 0.3.2 to 1.0.0+41 button update
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-1.0.0-41-public-update
+  cancel-in-progress: false
+
+jobs:
+  real-auto-update:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    env:
+      SOURCE_COMMIT: '0d63c2626906e03ab5799efb91eb3e4218b8e283'
+      BK_SOURCE_ARCHIVE_SHA256: 'e5eb6448fd952172c5b02fb49288f8e70985ab6099eea6649b6227f1acf073b5'
+      BK_CIPHER_PATH: '.github/release-inputs/BuddyKit-1.0.0-41-0d63c26.tar.enc'
+    defaults:
+      run:
+        shell: powershell
+    steps:
+      - name: Validate encrypted public build request
+        id: request
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $env:BK_SOURCE = Join-Path $env:RUNNER_TEMP 'buddykit-windows-auto-update-41-source'
+          $env:BK_EVIDENCE = Join-Path $env:RUNNER_TEMP 'buddykit-windows-auto-update-41-evidence'
+          $env:BK_ENCRYPTED_EVIDENCE = Join-Path $env:RUNNER_TEMP 'buddykit-windows-auto-update-41-encrypted-evidence'
+          $env:BK_BASELINE = Join-Path $env:RUNNER_TEMP 'buddykit-windows-auto-update-41-baseline'
+          foreach ($name in @('BK_SOURCE', 'BK_EVIDENCE', 'BK_ENCRYPTED_EVIDENCE', 'BK_BASELINE')) {
+            ($name + '=' + [Environment]::GetEnvironmentVariable($name)) | Out-File -LiteralPath $env:GITHUB_ENV -Encoding utf8 -Append
+          }
+          New-Item -ItemType Directory -Path $env:BK_EVIDENCE -Force | Out-Null
+          if ($env:GITHUB_REPOSITORY -ne 'itzhaolei/BuddyKit-site') { throw 'Unexpected encrypted build repository.' }
+          if ($env:SOURCE_COMMIT -ne '0d63c2626906e03ab5799efb91eb3e4218b8e283') { throw 'Unexpected approved source identity.' }
+          if ($env:BK_SOURCE_ARCHIVE_SHA256 -notmatch '^[0-9a-f]{64}$') { throw 'A frozen source archive checksum is required.' }
+
+      - name: Check out encrypted input only
+        id: checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          sparse-checkout: .github/release-inputs/BuddyKit-1.0.0-41-0d63c26.tar.enc
+          sparse-checkout-cone-mode: false
+
+      - name: Set up Python for authenticated source and diagnostics
+        id: python_setup
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install authenticated encryption dependency
+        id: crypto_dependency
+        run: |
+          $taskLog = Join-Path $env:BK_EVIDENCE 'crypto-dependency.log'
+          & $env:ComSpec /d /c ('python -m pip install --disable-pip-version-check --no-cache-dir PyNaCl==1.6.2 > "' + $taskLog + '" 2>&1')
+          if ($LASTEXITCODE -ne 0) { throw 'Authenticated encryption dependency setup failed.' }
+
+      - name: Authenticate exact frozen source and verify version
+        id: source
+        env:
+          BK_BUILD_KEY: ${{ secrets.BUDDYKIT_WIN36_KEY_0B1333D8 }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          @'
+          import base64, hashlib, io, json, os, re, tarfile
+          from pathlib import Path, PurePosixPath
+          from nacl.secret import SecretBox
+          key = base64.b64decode(os.environ['BK_BUILD_KEY'], validate=True)
+          if len(key) != SecretBox.KEY_SIZE:
+              raise RuntimeError('Invalid source authentication key length')
+          encrypted = Path(os.environ['BK_CIPHER_PATH']).read_bytes()
+          encrypted_hash = hashlib.sha256(encrypted).hexdigest()
+          plaintext = SecretBox(key).decrypt(encrypted)
+          expected = os.environ['BK_SOURCE_ARCHIVE_SHA256']
+          if hashlib.sha256(plaintext).hexdigest() != expected:
+              raise RuntimeError('Authenticated frozen source checksum mismatch')
+          destination = Path(os.environ['BK_SOURCE'])
+          if destination.exists():
+              raise RuntimeError('Refusing to reuse a decrypted source directory')
+          with tarfile.open(fileobj=io.BytesIO(plaintext), mode='r:*') as archive:
+              for member in archive.getmembers():
+                  name = PurePosixPath(member.name)
+                  if name.is_absolute() or '..' in name.parts or not name.parts or name.parts[0] not in ('app', 'packaging', 'scripts'):
+                      raise RuntimeError('Unexpected frozen source archive member')
+                  if member.issym() or member.islnk() or not (member.isfile() or member.isdir()):
+                      raise RuntimeError('Refusing linked or special source archive members')
+                  if any(part in ('.git', 'build', '.dart_tool', 'ephemeral', 'dist', 'secrets') for part in name.parts):
+                      raise RuntimeError('Unexpected generated or private source archive member')
+              destination.mkdir()
+              archive.extractall(destination, filter='data')
+          pubspec = (destination / 'app/pubspec.yaml').read_text(encoding='utf-8')
+          if not re.search(r'^version:\s*1\.0\.0\+41\s*$', pubspec, re.M):
+              raise RuntimeError('Expected authenticated source version 1.0.0+41')
+          files = {}
+          for path in sorted(destination.rglob('*')):
+              if path.is_symlink():
+                  raise RuntimeError('Unexpected linked source after extraction')
+              if path.is_file():
+                  data = path.read_bytes()
+                  files[path.relative_to(destination).as_posix()] = {'sha256': hashlib.sha256(data).hexdigest(), 'size': len(data)}
+          record = {'sourceCommit': os.environ['SOURCE_COMMIT'], 'workflowCommit': os.environ['GITHUB_SHA'], 'workflowRepository': os.environ['GITHUB_REPOSITORY'], 'workflowRun': os.environ['GITHUB_RUN_ID'], 'sourceArchiveSHA256': expected, 'encryptedInputSHA256': encrypted_hash, 'authenticatedSource': True, 'version': '1.0.0', 'build': 41, 'realWorkBuddyAcceptance': False, 'files': files}
+          (Path(os.environ['BK_EVIDENCE']) / 'source.json').write_text(json.dumps(record, indent=2) + '\n', encoding='utf-8')
+          del plaintext, key, encrypted
+          '@ | python -
+          if ($LASTEXITCODE -ne 0) { throw 'Source authentication or identity verification failed.' }
+          Write-Output 'Authenticated frozen source and version verified.'
+
+      # Dispatch only after root confirms the real signed stable feed is 1.0.0+41.
+      # No feed override, application credential, or WorkBuddy installation is used.
+      - name: Parse PowerShell 5.1 and compile real updater CSharp helpers
+        id: powershell_contract
+        working-directory: ${{ env.BK_SOURCE }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $log = Join-Path $env:BK_EVIDENCE 'powershell-contract.log'
+          try {
+            & {
+              if ($PSVersionTable.PSVersion.Major -ne 5) { throw 'Windows PowerShell 5.1 is required.' }
+              $tokens = $null; $errors = $null
+              $testPath = (Resolve-Path scripts/test_windows_auto_update.ps1).Path
+              $null = [System.Management.Automation.Language.Parser]::ParseFile($testPath, [ref]$tokens, [ref]$errors)
+              if ($errors.Count -ne 0) { throw 'Auto-update PowerShell parsing failed.' }
+              $cpp = Get-Content -Raw app/windows/runner/app_updater.cpp
+              $helper = [regex]::Match($cpp, 'R"POWERSHELL\((.*?)\)POWERSHELL"', [Text.RegularExpressions.RegexOptions]::Singleline)
+              if (-not $helper.Success) { throw 'Updater helper not found.' }
+              $tokens = $null; $errors = $null
+              $null = [System.Management.Automation.Language.Parser]::ParseInput($helper.Groups[1].Value, [ref]$tokens, [ref]$errors)
+              if ($errors.Count -ne 0) { throw 'Updater helper parsing failed.' }
+              $csharp = [regex]::Match($helper.Groups[1].Value, "Add-Type -TypeDefinition @'\r?\n(.*?)\r?\n'@", [Text.RegularExpressions.RegexOptions]::Singleline)
+              if (-not $csharp.Success) { throw 'Updater CSharp helper not found.' }
+              Add-Type -TypeDefinition $csharp.Groups[1].Value
+              Add-Type -AssemblyName Accessibility
+              Add-Type -AssemblyName System.Drawing
+              $test = Get-Content -Raw -LiteralPath $testPath
+              $fixtureCSharp = [regex]::Match($test, "Add-Type -ReferencedAssemblies .*?-TypeDefinition @'\r?\n(.*?)\r?\n'@", [Text.RegularExpressions.RegexOptions]::Singleline)
+              if (-not $fixtureCSharp.Success) { throw 'Update fixture CSharp helper not found.' }
+              Add-Type -ReferencedAssemblies ([Accessibility.IAccessible].Assembly.Location) -TypeDefinition $fixtureCSharp.Groups[1].Value
+              @{ passed = $true; powershellMajor = 5; updaterCSharpCompiled = $true; fixtureCSharpCompiled = $true } |
+                ConvertTo-Json | Set-Content -LiteralPath (Join-Path $env:BK_EVIDENCE 'powershell-contract.json') -Encoding ASCII
+            } *> $log
+          } catch {
+            $_ | Out-String | Add-Content -LiteralPath $log
+            throw 'PowerShell/CSharp validation failed; private details retained for encryption.'
+          }
+
+      - name: Download and pin the official published 0.3.2 baseline
+        id: download_baseline
+        timeout-minutes: 5
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $log = Join-Path $env:BK_EVIDENCE 'baseline-download.log'
+          try {
+            & {
+              New-Item -ItemType Directory -Path $env:BK_BASELINE -Force | Out-Null
+              $installer = Join-Path $env:BK_BASELINE 'BuddyKit-0.3.2-Setup.exe'
+              $stdout = Join-Path $env:BK_EVIDENCE 'baseline-curl-output.log'
+              $stderr = Join-Path $env:BK_EVIDENCE 'baseline-curl-error.log'
+              $arguments = @('--silent', '--show-error', '--fail', '--location', '--connect-timeout', '30', '--max-time', '180', '--output', ('"' + $installer + '"'), 'https://buddykit.maple.xin/downloads/BuddyKit-0.3.2-Setup.exe')
+              $process = Start-Process -FilePath 'curl.exe' -ArgumentList $arguments -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru
+              try {
+                $null = $process.Handle
+                if (-not $process.WaitForExit(210000)) { $process.Kill(); throw 'Baseline download exceeded its process deadline.' }
+                if ($process.ExitCode -ne 0) { throw 'Baseline download command failed.' }
+              } finally { $process.Dispose() }
+              $expected = '1875697dbf15052d52270666bba3145d0b176d1abc0ff0448a39991b473a88cf'
+              $file = Get-Item -LiteralPath $installer
+              $actual = (Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash.ToLowerInvariant()
+              if ($actual -ne $expected) { throw 'Published baseline installer checksum mismatch.' }
+              @{ passed = $true; baselineVersion = '0.3.2'; baselineBuild = 14; url = 'https://buddykit.maple.xin/downloads/BuddyKit-0.3.2-Setup.exe'; size = $file.Length; sha256 = $actual } |
+                ConvertTo-Json | Set-Content -LiteralPath (Join-Path $env:BK_EVIDENCE 'baseline-download.json') -Encoding ASCII
+            } *> $log
+          } catch {
+            $_ | Out-String | Add-Content -LiteralPath $log
+            throw 'Pinned baseline download failed; private details retained for encryption.'
+          }
+
+      - name: Install baseline only in an isolated fixture directory
+        id: install_baseline
+        timeout-minutes: 3
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $log = Join-Path $env:BK_EVIDENCE 'baseline-install-command.log'
+          try {
+            & {
+              $installer = Join-Path $env:BK_BASELINE 'BuddyKit-0.3.2-Setup.exe'
+              $destination = Join-Path $env:BK_BASELINE 'installed app'
+              $installerLog = Join-Path $env:BK_EVIDENCE 'baseline-install.log'
+              $arguments = '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP- /DIR="' + $destination + '" /LOG="' + $installerLog + '"'
+              $process = Start-Process -FilePath $installer -ArgumentList $arguments -PassThru
+              try {
+                $null = $process.Handle
+                if (-not $process.WaitForExit(120000)) { $process.Kill(); throw 'Baseline installation exceeded two minutes.' }
+                if ($process.ExitCode -ne 0) { throw 'Baseline installation failed.' }
+                $exitCode = $process.ExitCode
+              } finally { $process.Dispose() }
+              $exe = Join-Path $destination 'buddykit.exe'
+              if ((Get-Item -LiteralPath $exe).VersionInfo.ProductVersion -ne '0.3.2+14') { throw 'Installed baseline version mismatch.' }
+              foreach ($relative in @('flutter_windows.dll', 'data/app.so', 'data/flutter_assets/assets/tray_icon.ico')) {
+                if (-not (Test-Path -LiteralPath (Join-Path $destination $relative) -PathType Leaf)) { throw 'Installed baseline runtime file missing.' }
+              }
+              @{ passed = $true; exitCode = $exitCode; productVersion = '0.3.2+14'; fixtureOnly = $true } |
+                ConvertTo-Json | Set-Content -LiteralPath (Join-Path $env:BK_EVIDENCE 'baseline-install.json') -Encoding ASCII
+            } *> $log
+          } catch {
+            $_ | Out-String | Add-Content -LiteralPath $log
+            throw 'Isolated baseline installation failed; private details retained for encryption.'
+          }
+
+      - name: Exercise the real published update button and same-path restart
+        id: auto_update
+        timeout-minutes: 13
+        working-directory: ${{ env.BK_SOURCE }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $log = Join-Path $env:BK_EVIDENCE 'auto-update-command.log'
+          try {
+            & {
+              $baseline = Join-Path $env:BK_BASELINE 'installed app'
+              $directory = Join-Path $env:BK_EVIDENCE 'auto-update'
+              & .\scripts\test_windows_auto_update.ps1 -BaselineDirectory $baseline -BaselineVersion '0.3.2' -BaselineBuild 14 -ExpectedVersion '1.0.0' -ExpectedBuild 41 -EvidenceDirectory $directory
+              $resultPath = Join-Path $directory 'windows-auto-update.json'
+              if (-not (Test-Path -LiteralPath $resultPath -PathType Leaf)) { throw 'Real update success evidence missing.' }
+              $result = Get-Content -LiteralPath $resultPath -Raw | ConvertFrom-Json
+              if ($result.success -ne $true -or $result.baselineVersion -ne '0.3.2+14' -or $result.installedVersion -ne '1.0.0+41') { throw 'Real update version evidence mismatch.' }
+              if ($result.invokedThrough -ne 'MSAA accDoDefaultAction; public signed stable feed') { throw 'The rendered official-feed update button was not confirmed.' }
+              if ($result.beforeProcessId -eq $result.afterProcessId -and $result.beforeCreationTicks -eq $result.afterCreationTicks) { throw 'A replacement process was not confirmed.' }
+              if (@($result.preservedFileHashes.PSObject.Properties).Count -lt 3) { throw 'Fixture application-data hash evidence missing.' }
+            } *> $log
+          } catch {
+            $_ | Out-String | Add-Content -LiteralPath $log
+            throw 'Real official-feed button update failed; private details retained for encryption.'
+          }
+
+      - name: Collect bounded updater diagnostics on success or failure
+        id: collect_diagnostics
+        if: always()
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $log = Join-Path $env:BK_EVIDENCE 'diagnostic-collection.log'
+          try {
+            & {
+              $updateRoot = Join-Path ([IO.Path]::GetTempPath()) 'BuddyKit/Updates'
+              if (Test-Path -LiteralPath $updateRoot -PathType Container) {
+                foreach ($directory in @(Get-ChildItem -LiteralPath $updateRoot -Directory -Filter 'run-*' | Select-Object -First 8)) {
+                  foreach ($name in @('diagnostic.log', 'installer.log')) {
+                    $path = Join-Path $directory.FullName $name
+                    if (Test-Path -LiteralPath $path -PathType Leaf) {
+                      $destination = Join-Path $env:BK_EVIDENCE ('updater/' + $directory.Name)
+                      New-Item -ItemType Directory -Path $destination -Force | Out-Null
+                      Copy-Item -LiteralPath $path -Destination (Join-Path $destination $name)
+                    }
+                  }
+                }
+              }
+            } *> $log
+          } catch {
+            $_ | Out-String | Add-Content -LiteralPath $log
+            throw 'Updater diagnostic collection failed; private details retained for encryption.'
+          }
+
+      - name: Require exact mandatory outcomes and record update acceptance
+        id: final_gate
+        if: always()
+        env:
+          STEP_RESULTS: ${{ toJSON(steps) }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Path $env:BK_EVIDENCE -Force | Out-Null
+          $steps = $env:STEP_RESULTS | ConvertFrom-Json
+          $required = @('request', 'checkout', 'python_setup', 'crypto_dependency', 'source', 'powershell_contract', 'download_baseline', 'install_baseline', 'auto_update', 'collect_diagnostics')
+          $outcomes = [ordered]@{}
+          foreach ($key in $required) {
+            $property = $steps.PSObject.Properties[$key]
+            $outcomes[$key] = if ($null -eq $property) { 'missing' } else { $property.Value.outcome }
+          }
+          $passed = @($outcomes.Values | Where-Object { $_ -ne 'success' }).Count -eq 0
+          $result = [ordered]@{ passed = $passed; sourceCommit = $env:SOURCE_COMMIT; sourceArchiveSHA256 = $env:BK_SOURCE_ARCHIVE_SHA256; workflowCommit = $env:GITHUB_SHA; workflowRepository = $env:GITHUB_REPOSITORY; workflowRun = $env:GITHUB_RUN_ID; workflowAttempt = $env:GITHUB_RUN_ATTEMPT; baselineVersion = '0.3.2'; baselineBuild = 14; baselineInstallerSHA256 = '1875697dbf15052d52270666bba3145d0b176d1abc0ff0448a39991b473a88cf'; targetVersion = '1.0.0'; targetBuild = 41; actualOfficialFeedButtonUpdate = $passed; actualWorkBuddyLoginUsed = $false; outcomes = $outcomes }
+          $result | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $env:BK_EVIDENCE 'result.json') -Encoding ASCII
+          if (-not $passed) { throw 'A mandatory raw update-validation outcome failed or is missing; acceptance is false.' }
+
+      - name: Authenticated encryption of validation evidence on every outcome
+        id: encrypt_evidence
+        if: always()
+        env:
+          BK_BUILD_KEY: ${{ secrets.BUDDYKIT_WIN36_KEY_0B1333D8 }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          @'
+          import base64, io, json, os, zipfile
+          from pathlib import Path
+          from nacl.secret import SecretBox
+          evidence = Path(os.environ['BK_EVIDENCE'])
+          output = Path(os.environ['BK_ENCRYPTED_EVIDENCE'])
+          key = base64.b64decode(os.environ['BK_BUILD_KEY'], validate=True)
+          if len(key) != SecretBox.KEY_SIZE:
+              raise RuntimeError('Invalid diagnostic authentication key length')
+          output.mkdir(exist_ok=True)
+          if not evidence.is_dir():
+              evidence.mkdir()
+          context = {'sourceCommit': os.environ['SOURCE_COMMIT'], 'sourceArchiveSHA256': os.environ['BK_SOURCE_ARCHIVE_SHA256'], 'workflowCommit': os.environ['GITHUB_SHA'], 'workflowRepository': os.environ['GITHUB_REPOSITORY'], 'workflowRun': os.environ['GITHUB_RUN_ID'], 'version': '1.0.0', 'build': 41, 'plaintextDiagnosticsUploaded': False}
+          (evidence / 'encrypted-artifact-context.json').write_text(json.dumps(context, indent=2) + '\n', encoding='utf-8')
+          stream = io.BytesIO()
+          with zipfile.ZipFile(stream, 'w', compression=zipfile.ZIP_DEFLATED) as archive:
+              for path in sorted(evidence.rglob('*')):
+                  if path.is_symlink():
+                      raise RuntimeError('Refusing linked diagnostic evidence')
+                  if path.is_file():
+                      archive.write(path, arcname=path.relative_to(evidence).as_posix())
+          plaintext = stream.getvalue()
+          encrypted = bytes(SecretBox(key).encrypt(plaintext))
+          (output / 'windows-validation.zip.enc').write_bytes(encrypted)
+          del plaintext, key, encrypted
+          '@ | python -
+          if ($LASTEXITCODE -ne 0) { throw 'Diagnostic encryption failed; plaintext upload is forbidden.' }
+          Write-Output 'Validation evidence retained only as authenticated ciphertext.'
+
+      - name: Upload authenticated encrypted validation evidence only
+        id: upload_encrypted_evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: BuddyKit-windows-auto-update-encrypted-evidence-1.0.0-41
+          path: ${{ runner.temp }}/buddykit-windows-auto-update-41-encrypted-evidence/windows-validation.zip.enc
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Remove decrypted source and plaintext diagnostic evidence
+        if: always()
+        run: |
+          foreach ($name in @('buddykit-windows-auto-update-41-source', 'buddykit-windows-auto-update-41-evidence', 'buddykit-windows-auto-update-41-baseline')) {
+            Remove-Item -LiteralPath (Join-Path $env:RUNNER_TEMP $name) -Recurse -Force -ErrorAction SilentlyContinue
+          }
