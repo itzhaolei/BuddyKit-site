@@ -1,0 +1,386 @@
+name: Verify and package Windows 1.0.0+40 encrypted fallback
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-1.0.0-40-public-encrypted
+  cancel-in-progress: false
+
+jobs:
+  windows-release:
+    runs-on: windows-latest
+    timeout-minutes: 75
+    env:
+      SOURCE_COMMIT: '9754ee605ba815bca5d82d45122413cbbc03a6ea'
+      BK_SOURCE_ARCHIVE_SHA256: 'cd443605119e98903eed0bbbe9123cd581a7aacb1e61d3db0cfa8520e085886c'
+      BK_CIPHER_PATH: '.github/release-inputs/BuddyKit-1.0.0-40-9754ee6.tar.enc'
+    defaults:
+      run:
+        shell: powershell
+    steps:
+      - name: Validate encrypted public build request
+        id: request
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $env:BK_SOURCE = Join-Path $env:RUNNER_TEMP 'buddykit-windows-1.0.0-40-source'
+          $env:BK_EVIDENCE = Join-Path $env:RUNNER_TEMP 'buddykit-windows-1.0.0-40-evidence'
+          $env:BK_ENCRYPTED_EVIDENCE = Join-Path $env:RUNNER_TEMP 'buddykit-windows-1.0.0-40-encrypted-evidence'
+          foreach ($name in @('BK_SOURCE', 'BK_EVIDENCE', 'BK_ENCRYPTED_EVIDENCE')) {
+            ($name + '=' + [Environment]::GetEnvironmentVariable($name)) | Out-File -LiteralPath $env:GITHUB_ENV -Encoding utf8 -Append
+          }
+          New-Item -ItemType Directory -Path $env:BK_EVIDENCE -Force | Out-Null
+          if ($env:GITHUB_REPOSITORY -ne 'itzhaolei/BuddyKit-site') { throw 'Unexpected encrypted build repository.' }
+          if ($env:SOURCE_COMMIT -ne '9754ee605ba815bca5d82d45122413cbbc03a6ea') { throw 'Unexpected approved source identity.' }
+          if ($env:BK_SOURCE_ARCHIVE_SHA256 -notmatch '^[0-9a-f]{64}$') { throw 'A frozen source archive checksum is required.' }
+
+      - name: Check out encrypted input only
+        id: checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          sparse-checkout: .github/release-inputs/BuddyKit-1.0.0-40-9754ee6.tar.enc
+          sparse-checkout-cone-mode: false
+
+      - name: Set up Python for authenticated source and diagnostics
+        id: python_setup
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install authenticated encryption dependency
+        id: crypto_dependency
+        run: |
+          $taskLog = Join-Path $env:BK_EVIDENCE 'crypto-dependency.log'
+          & $env:ComSpec /d /c ('python -m pip install --disable-pip-version-check --no-cache-dir PyNaCl==1.6.2 > "' + $taskLog + '" 2>&1')
+          if ($LASTEXITCODE -ne 0) { throw 'Authenticated encryption dependency setup failed.' }
+
+      - name: Authenticate exact frozen source and verify version
+        id: source
+        env:
+          BK_BUILD_KEY: ${{ secrets.BUDDYKIT_WIN36_KEY_0B1333D8 }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          @'
+          import base64, hashlib, io, json, os, re, tarfile
+          from pathlib import Path, PurePosixPath
+          from nacl.secret import SecretBox
+          key = base64.b64decode(os.environ['BK_BUILD_KEY'], validate=True)
+          if len(key) != SecretBox.KEY_SIZE:
+              raise RuntimeError('Invalid source authentication key length')
+          encrypted = Path(os.environ['BK_CIPHER_PATH']).read_bytes()
+          encrypted_hash = hashlib.sha256(encrypted).hexdigest()
+          plaintext = SecretBox(key).decrypt(encrypted)
+          expected = os.environ['BK_SOURCE_ARCHIVE_SHA256']
+          if hashlib.sha256(plaintext).hexdigest() != expected:
+              raise RuntimeError('Authenticated frozen source checksum mismatch')
+          destination = Path(os.environ['BK_SOURCE'])
+          if destination.exists():
+              raise RuntimeError('Refusing to reuse a decrypted source directory')
+          with tarfile.open(fileobj=io.BytesIO(plaintext), mode='r:*') as archive:
+              for member in archive.getmembers():
+                  name = PurePosixPath(member.name)
+                  if name.is_absolute() or '..' in name.parts or not name.parts or name.parts[0] not in ('app', 'packaging', 'scripts'):
+                      raise RuntimeError('Unexpected frozen source archive member')
+                  if member.issym() or member.islnk() or not (member.isfile() or member.isdir()):
+                      raise RuntimeError('Refusing linked or special source archive members')
+                  if any(part in ('.git', 'build', '.dart_tool', 'ephemeral', 'dist', 'secrets') for part in name.parts):
+                      raise RuntimeError('Unexpected generated or private source archive member')
+              destination.mkdir()
+              archive.extractall(destination, filter='data')
+          pubspec = (destination / 'app/pubspec.yaml').read_text(encoding='utf-8')
+          if not re.search(r'^version:\s*1\.0\.0\+40\s*$', pubspec, re.M):
+              raise RuntimeError('Expected authenticated source version 1.0.0+40')
+          files = {}
+          for path in sorted(destination.rglob('*')):
+              if path.is_symlink():
+                  raise RuntimeError('Unexpected linked source after extraction')
+              if path.is_file():
+                  data = path.read_bytes()
+                  files[path.relative_to(destination).as_posix()] = {'sha256': hashlib.sha256(data).hexdigest(), 'size': len(data)}
+          record = {'sourceCommit': os.environ['SOURCE_COMMIT'], 'workflowCommit': os.environ['GITHUB_SHA'], 'workflowRepository': os.environ['GITHUB_REPOSITORY'], 'workflowRun': os.environ['GITHUB_RUN_ID'], 'sourceArchiveSHA256': expected, 'encryptedInputSHA256': encrypted_hash, 'authenticatedSource': True, 'version': '1.0.0', 'build': 40, 'realWorkBuddyAcceptance': False, 'files': files}
+          (Path(os.environ['BK_EVIDENCE']) / 'source.json').write_text(json.dumps(record, indent=2) + '\n', encoding='utf-8')
+          del plaintext, key, encrypted
+          '@ | python -
+          if ($LASTEXITCODE -ne 0) { throw 'Source authentication or identity verification failed.' }
+          Write-Output 'Authenticated frozen source and version verified.'
+
+      - name: Set up Flutter
+        id: flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.2'
+          channel: stable
+          cache: true
+
+      - name: Resolve locked dependencies
+        id: pub
+        working-directory: ${{ env.BK_SOURCE }}/app
+        run: |
+          & ..\scripts\ci\run_logged_windows_command.ps1 -Command 'call flutter pub get --enforce-lockfile' -LogPath (Join-Path $env:BK_EVIDENCE 'pub.log')
+          if ($LASTEXITCODE -ne 0) { throw 'Locked dependency resolution failed.' }
+
+      - name: Analyze complete Dart source
+        id: analyze
+        working-directory: ${{ env.BK_SOURCE }}/app
+        run: |
+          & ..\scripts\ci\run_logged_windows_command.ps1 -Command 'call flutter analyze --no-pub' -LogPath (Join-Path $env:BK_EVIDENCE 'analyze.log')
+          if ($LASTEXITCODE -ne 0) { throw 'Dart analysis failed.' }
+
+      - name: Run complete Dart tests
+        id: tests
+        working-directory: ${{ env.BK_SOURCE }}/app
+        run: |
+          & ..\scripts\ci\run_logged_windows_command.ps1 -Command 'call flutter test --no-pub --concurrency=2 --reporter expanded' -LogPath (Join-Path $env:BK_EVIDENCE 'tests.log')
+          if ($LASTEXITCODE -ne 0) { throw 'Complete Dart tests failed.' }
+          $text = Get-Content -Raw (Join-Path $env:BK_EVIDENCE 'tests.log')
+          if ($text -notmatch 'All tests passed!') { throw 'Passing Dart test summary not found.' }
+
+      - name: Parse Windows PowerShell 5.1 scripts and compile updater CSharp
+        id: powershell_contract
+        working-directory: ${{ env.BK_SOURCE }}
+        run: |
+          $stageLog = Join-Path $env:BK_EVIDENCE 'powershell_contract-diagnostics.log'
+          try {
+            & {
+              $ErrorActionPreference = 'Stop'
+              if ($PSVersionTable.PSVersion.Major -ne 5) { throw 'Windows PowerShell 5.1 is required.' }
+              $source = Get-Content -Raw app/windows/runner/app_updater.cpp
+              $match = [regex]::Match($source, 'R"POWERSHELL\((.*?)\)POWERSHELL"', [System.Text.RegularExpressions.RegexOptions]::Singleline)
+              if (-not $match.Success) { throw 'Updater helper not found.' }
+              $tokens = $null; $errors = $null
+              $null = [System.Management.Automation.Language.Parser]::ParseInput($match.Groups[1].Value, [ref]$tokens, [ref]$errors)
+              if ($errors.Count -ne 0) { throw 'Updater PowerShell parsing failed.' }
+              $csharp = [regex]::Match($match.Groups[1].Value, "Add-Type -TypeDefinition @'\r?\n(.*?)\r?\n'@", [System.Text.RegularExpressions.RegexOptions]::Singleline)
+              if (-not $csharp.Success) { throw 'Updater CSharp helper not found.' }
+              Add-Type -TypeDefinition $csharp.Groups[1].Value
+              foreach ($path in @('scripts/test_windows_auto_update.ps1', 'scripts/test_windows_app_version.ps1', 'scripts/test_windows_single_instance.ps1', 'scripts/test_windows_workbuddy_runtime.ps1', 'scripts/ci/run_logged_windows_command.ps1', 'scripts/ci/verify_windows_no_uia.ps1')) {
+                $tokens = $null; $errors = $null
+                $null = [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $path).Path, [ref]$tokens, [ref]$errors)
+                if ($errors.Count -ne 0) { throw ('PowerShell parsing failed: ' + $path) }
+              }
+              @{ passed = $true; powershellMajor = 5; updaterCSharpCompiled = $true } | ConvertTo-Json |
+                Set-Content -LiteralPath (Join-Path $env:BK_EVIDENCE 'powershell-contract.json') -Encoding ASCII
+            } *> $stageLog
+          } catch {
+            $_ | Out-String | Add-Content -LiteralPath $stageLog -Encoding utf8
+            throw 'Validation stage failed; details retained in encrypted evidence.'
+          }
+
+      - name: Compile and run native authentication and runtime contracts with MSVC
+        id: native_runtime
+        working-directory: ${{ env.BK_SOURCE }}
+        run: |
+          $stageLog = Join-Path $env:BK_EVIDENCE 'native_runtime-diagnostics.log'
+          try {
+            & {
+              $ErrorActionPreference = 'Stop'
+              $directory = Join-Path $env:BK_EVIDENCE 'native-runtime'
+              & .\scripts\test_windows_workbuddy_runtime.ps1 -EvidenceDirectory $directory
+              $results = @(Get-ChildItem -LiteralPath $directory -Recurse -Filter result.json)
+              if ($results.Count -ne 1) { throw 'Expected one native runtime result.' }
+              $result = Get-Content -Raw -LiteralPath $results[0].FullName | ConvertFrom-Json
+              if ($result.success -ne $true -or $result.exitCode -ne 0 -or $result.realWorkBuddyAcceptance -ne $false) { throw 'Native runtime contracts failed.' }
+            } *> $stageLog
+          } catch {
+            $_ | Out-String | Add-Content -LiteralPath $stageLog -Encoding utf8
+            throw 'Validation stage failed; details retained in encrypted evidence.'
+          }
+
+      - name: Build Windows release with MSVC
+        id: release
+        working-directory: ${{ env.BK_SOURCE }}/app
+        run: |
+          & ..\scripts\ci\run_logged_windows_command.ps1 -Command 'call flutter build windows --no-pub --release --build-name=1.0.0 --build-number=40' -LogPath (Join-Path $env:BK_EVIDENCE 'release.log')
+          if ($LASTEXITCODE -ne 0) { throw 'Windows release compilation failed.' }
+          $bundle = 'build/windows/x64/runner/Release'
+          foreach ($file in @('buddykit.exe', 'flutter_windows.dll', 'msvcp140.dll', 'vcruntime140.dll', 'vcruntime140_1.dll', 'data/app.so', 'data/flutter_assets/assets/tray_icon.ico')) {
+            if (-not (Test-Path -LiteralPath (Join-Path $bundle $file) -PathType Leaf)) { throw ('Missing runtime file: ' + $file) }
+          }
+          if ((Get-Item (Join-Path $bundle 'buddykit.exe')).VersionInfo.ProductVersion -ne '1.0.0+40') { throw 'Executable version/build mismatch.' }
+
+      - name: Exclude product UIA controls and debugger bridges
+        id: native_no_uia
+        working-directory: ${{ env.BK_SOURCE }}
+        run: |
+          $stageLog = Join-Path $env:BK_EVIDENCE 'native_no_uia-diagnostics.log'
+          try {
+            & {
+              & .\scripts\ci\verify_windows_no_uia.ps1 -SourceRoot (Get-Location).Path -BundlePath (Resolve-Path app/build/windows/x64/runner/Release).Path -EvidencePath (Join-Path $env:BK_EVIDENCE 'native-no-uia.json') -ExpectedVersion '1.0.0' -ExpectedBuild 40
+            } *> $stageLog
+          } catch {
+            $_ | Out-String | Add-Content -LiteralPath $stageLog -Encoding utf8
+            throw 'Validation stage failed; details retained in encrypted evidence.'
+          }
+
+      - name: Verify real sidebar version
+        id: version
+        working-directory: ${{ env.BK_SOURCE }}
+        run: |
+          $stageLog = Join-Path $env:BK_EVIDENCE 'version-diagnostics.log'
+          try {
+            & {
+              & .\scripts\test_windows_app_version.ps1 -ExecutablePath (Resolve-Path app/build/windows/x64/runner/Release/buddykit.exe).Path -EvidenceDirectory (Join-Path $env:BK_EVIDENCE 'version')
+            } *> $stageLog
+          } catch {
+            $_ | Out-String | Add-Content -LiteralPath $stageLog -Encoding utf8
+            throw 'Validation stage failed; details retained in encrypted evidence.'
+          }
+
+      - name: Verify single-instance and tray lifecycle
+        id: single_instance
+        working-directory: ${{ env.BK_SOURCE }}
+        run: |
+          $stageLog = Join-Path $env:BK_EVIDENCE 'single_instance-diagnostics.log'
+          try {
+            & {
+              & .\scripts\test_windows_single_instance.ps1 -ExecutablePath (Resolve-Path app/build/windows/x64/runner/Release/buddykit.exe).Path
+              @{ passed = $true } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $env:BK_EVIDENCE 'single-instance.json') -Encoding ASCII
+            } *> $stageLog
+          } catch {
+            $_ | Out-String | Add-Content -LiteralPath $stageLog -Encoding utf8
+            throw 'Validation stage failed; details retained in encrypted evidence.'
+          }
+
+      - name: Require every validation outcome before packaging
+        id: prepackage_gate
+        if: always()
+        env:
+          STEP_RESULTS: ${{ toJSON(steps) }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $steps = $env:STEP_RESULTS | ConvertFrom-Json
+          $required = @('request', 'checkout', 'python_setup', 'crypto_dependency', 'source', 'flutter', 'pub', 'analyze', 'tests', 'powershell_contract', 'native_runtime', 'release', 'native_no_uia', 'version', 'single_instance')
+          $outcomes = [ordered]@{}
+          foreach ($key in $required) {
+            $property = $steps.PSObject.Properties[$key]
+            $outcomes[$key] = if ($null -eq $property) { 'missing' } else { $property.Value.outcome }
+          }
+          $outcomes | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $env:BK_EVIDENCE 'validation-outcomes.json') -Encoding ASCII
+          if (@($outcomes.Values | Where-Object { $_ -ne 'success' }).Count -ne 0) { throw 'A required validation did not succeed; installer packaging is forbidden.' }
+
+      - name: Build Inno Setup installer
+        id: installer
+        if: steps.prepackage_gate.outcome == 'success'
+        working-directory: ${{ env.BK_SOURCE }}
+        run: |
+          & .\scripts\ci\run_logged_windows_command.ps1 -Command 'iscc /DMyAppVersion=1.0.0 packaging\windows\BuddyKit.iss' -LogPath (Join-Path $env:BK_EVIDENCE 'installer.log')
+          if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath dist/BuddyKit-1.0.0-Setup.exe -PathType Leaf)) { throw 'Installer packaging failed.' }
+
+      - name: Install packaged application into an isolated directory
+        id: install_smoke
+        if: steps.installer.outcome == 'success'
+        working-directory: ${{ env.BK_SOURCE }}
+        run: |
+          $stageLog = Join-Path $env:BK_EVIDENCE 'install_smoke-diagnostics.log'
+          try {
+            & {
+              $ErrorActionPreference = 'Stop'
+              $installer = (Resolve-Path dist/BuddyKit-1.0.0-Setup.exe).Path
+              $destination = Join-Path $env:RUNNER_TEMP 'BuddyKit-installed-1.0.0-40'
+              $process = Start-Process -FilePath $installer -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-', ('/DIR="' + $destination + '"')) -PassThru
+              if (-not $process.WaitForExit(120000)) { $process.Kill(); throw 'Installer timed out.' }
+              if ($process.ExitCode -ne 0) { throw 'Installer did not complete successfully.' }
+              $installed = Join-Path $destination 'buddykit.exe'
+              if ((Get-Item -LiteralPath $installed).VersionInfo.ProductVersion -ne '1.0.0+40') { throw 'Installed executable version mismatch.' }
+              $expectedHash = (Get-FileHash app/build/windows/x64/runner/Release/buddykit.exe -Algorithm SHA256).Hash
+              if ((Get-FileHash -LiteralPath $installed -Algorithm SHA256).Hash -ne $expectedHash) { throw 'Installed executable differs from verified release.' }
+              & .\scripts\test_windows_app_version.ps1 -ExecutablePath $installed -EvidenceDirectory (Join-Path $env:BK_EVIDENCE 'installed-version')
+              @{ passed = $true; installerExitCode = $process.ExitCode; installedProductVersion = '1.0.0+40'; executableSHA256 = $expectedHash.ToLowerInvariant() } |
+                ConvertTo-Json | Set-Content -LiteralPath (Join-Path $env:BK_EVIDENCE 'install-smoke.json') -Encoding ASCII
+            } *> $stageLog
+          } catch {
+            $_ | Out-String | Add-Content -LiteralPath $stageLog -Encoding utf8
+            throw 'Validation stage failed; details retained in encrypted evidence.'
+          }
+
+      - name: Require all gates and record final installer identity
+        id: final_gate
+        if: always()
+        env:
+          STEP_RESULTS: ${{ toJSON(steps) }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Path $env:BK_EVIDENCE -Force | Out-Null
+          $steps = $env:STEP_RESULTS | ConvertFrom-Json
+          $required = @('request', 'checkout', 'python_setup', 'crypto_dependency', 'source', 'flutter', 'pub', 'analyze', 'tests', 'powershell_contract', 'native_runtime', 'release', 'native_no_uia', 'version', 'single_instance', 'prepackage_gate', 'installer', 'install_smoke')
+          $outcomes = [ordered]@{}
+          foreach ($key in $required) {
+            $property = $steps.PSObject.Properties[$key]
+            $outcomes[$key] = if ($null -eq $property) { 'missing' } else { $property.Value.outcome }
+          }
+          $passed = @($outcomes.Values | Where-Object { $_ -ne 'success' }).Count -eq 0
+          $result = [ordered]@{ success = $passed; sourceCommit = $env:SOURCE_COMMIT; sourceArchiveSHA256 = $env:BK_SOURCE_ARCHIVE_SHA256; workflowRepository = $env:GITHUB_REPOSITORY; workflowCommit = $env:GITHUB_SHA; runId = $env:GITHUB_RUN_ID; runAttempt = $env:GITHUB_RUN_ATTEMPT; version = '1.0.0'; build = 40; outcomes = $outcomes; realWorkBuddyAcceptance = $false; actualWebsiteButtonUpdate = 'pending publication of official 1.0.0+40 feed' }
+          if ($passed) {
+            $file = Get-Item -LiteralPath (Join-Path $env:BK_SOURCE 'dist/BuddyKit-1.0.0-Setup.exe')
+            $result['installer'] = @{ name = $file.Name; size = $file.Length; sha256 = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant() }
+          }
+          $result | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $env:BK_EVIDENCE 'result.json') -Encoding ASCII
+          if (-not $passed) { throw 'A required raw step outcome failed or is missing; installer upload is forbidden.' }
+
+      - name: Upload verified installer only
+        id: upload_installer
+        if: steps.final_gate.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: BuddyKit-windows-installer-1.0.0-40
+          path: ${{ env.BK_SOURCE }}/dist/BuddyKit-1.0.0-Setup.exe
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Authenticated encryption of validation evidence on every outcome
+        id: encrypt_evidence
+        if: always()
+        env:
+          BK_BUILD_KEY: ${{ secrets.BUDDYKIT_WIN36_KEY_0B1333D8 }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          @'
+          import base64, io, json, os, zipfile
+          from pathlib import Path
+          from nacl.secret import SecretBox
+          evidence = Path(os.environ['BK_EVIDENCE'])
+          output = Path(os.environ['BK_ENCRYPTED_EVIDENCE'])
+          key = base64.b64decode(os.environ['BK_BUILD_KEY'], validate=True)
+          if len(key) != SecretBox.KEY_SIZE:
+              raise RuntimeError('Invalid diagnostic authentication key length')
+          output.mkdir(exist_ok=True)
+          if not evidence.is_dir():
+              evidence.mkdir()
+          context = {'sourceCommit': os.environ['SOURCE_COMMIT'], 'sourceArchiveSHA256': os.environ['BK_SOURCE_ARCHIVE_SHA256'], 'workflowCommit': os.environ['GITHUB_SHA'], 'workflowRepository': os.environ['GITHUB_REPOSITORY'], 'workflowRun': os.environ['GITHUB_RUN_ID'], 'version': '1.0.0', 'build': 40, 'plaintextDiagnosticsUploaded': False}
+          (evidence / 'encrypted-artifact-context.json').write_text(json.dumps(context, indent=2) + '\n', encoding='utf-8')
+          stream = io.BytesIO()
+          with zipfile.ZipFile(stream, 'w', compression=zipfile.ZIP_DEFLATED) as archive:
+              for path in sorted(evidence.rglob('*')):
+                  if path.is_symlink():
+                      raise RuntimeError('Refusing linked diagnostic evidence')
+                  if path.is_file():
+                      archive.write(path, arcname=path.relative_to(evidence).as_posix())
+          plaintext = stream.getvalue()
+          encrypted = bytes(SecretBox(key).encrypt(plaintext))
+          (output / 'windows-validation.zip.enc').write_bytes(encrypted)
+          del plaintext, key, encrypted
+          '@ | python -
+          if ($LASTEXITCODE -ne 0) { throw 'Diagnostic encryption failed; plaintext upload is forbidden.' }
+          Write-Output 'Validation evidence retained only as authenticated ciphertext.'
+
+      - name: Upload authenticated encrypted validation evidence only
+        id: upload_encrypted_evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: BuddyKit-windows-encrypted-evidence-1.0.0-40
+          path: ${{ runner.temp }}/buddykit-windows-1.0.0-40-encrypted-evidence/windows-validation.zip.enc
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Remove decrypted source and plaintext diagnostic evidence
+        if: always()
+        run: |
+          foreach ($name in @('buddykit-windows-1.0.0-40-source', 'buddykit-windows-1.0.0-40-evidence')) {
+            Remove-Item -LiteralPath (Join-Path $env:RUNNER_TEMP $name) -Recurse -Force -ErrorAction SilentlyContinue
+          }
