@@ -198,7 +198,7 @@ jobs:
           & ..\scripts\ci\run_logged_windows_command.ps1 -Command 'call flutter build windows --no-pub --release --build-name=1.0.0 --build-number=41' -LogPath (Join-Path $env:BK_EVIDENCE 'release.log')
           if ($LASTEXITCODE -ne 0) { throw 'Windows release compilation failed.' }
           $bundle = 'build/windows/x64/runner/Release'
-          foreach ($file in @('buddykit.exe', 'flutter_windows.dll', 'msvcp141.dll', 'vcruntime141.dll', 'vcruntime141_1.dll', 'data/app.so', 'data/flutter_assets/assets/tray_icon.ico')) {
+          foreach ($file in @('buddykit.exe', 'flutter_windows.dll', 'msvcp140.dll', 'vcruntime140.dll', 'vcruntime140_1.dll', 'data/app.so', 'data/flutter_assets/assets/tray_icon.ico')) {
             if (-not (Test-Path -LiteralPath (Join-Path $bundle $file) -PathType Leaf)) { throw ('Missing runtime file: ' + $file) }
           }
           if ((Get-Item (Join-Path $bundle 'buddykit.exe')).VersionInfo.ProductVersion -ne '1.0.0+41') { throw 'Executable version/build mismatch.' }
