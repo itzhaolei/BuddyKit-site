@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="background" gradientUnits="userSpaceOnUse" x1="874" y1="150" x2="150" y2="874">
+      <stop stop-color="#07122E"/>
+      <stop offset="1" stop-color="#0B1D45"/>
+    </linearGradient>
+    <radialGradient id="blueAmbient" gradientUnits="userSpaceOnUse" cx="0" cy="0" r="1" gradientTransform="translate(280 100) scale(530 440)">
+      <stop stop-color="#476BFF" stop-opacity="0.180392"/>
+      <stop offset="1" stop-color="#476BFF" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="tealAmbient" gradientUnits="userSpaceOnUse" cx="0" cy="0" r="1" gradientTransform="translate(830 980) scale(410 360)">
+      <stop stop-color="#13D8C0" stop-opacity="0.164706"/>
+      <stop offset="1" stop-color="#13D8C0" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="blueLoop" gradientUnits="userSpaceOnUse" x1="545.205" y1="325" x2="198.795" y2="635">
+      <stop stop-color="#8296FF"/>
+      <stop offset="1" stop-color="#3D5FFF"/>
+    </linearGradient>
+    <linearGradient id="tealLoop" gradientUnits="userSpaceOnUse" x1="825.205" y1="395" x2="478.795" y2="705">
+      <stop stop-color="#54F2DC"/>
+      <stop offset="1" stop-color="#0FC2BE"/>
+    </linearGradient>
+    <clipPath id="roundedFrame">
+      <rect width="1024" height="1024" rx="232"/>
+    </clipPath>
+  </defs>
+  <g clip-path="url(#roundedFrame)">
+    <rect width="1024" height="1024" rx="232" fill="url(#background)"/>
+    <ellipse cx="280" cy="100" rx="530" ry="440" fill="url(#blueAmbient)"/>
+    <ellipse cx="830" cy="980" rx="410" ry="360" fill="url(#tealAmbient)"/>
+    <rect x="172" y="170" width="400" height="620" rx="170" fill="none" stroke="url(#blueLoop)" stroke-width="128" stroke-linejoin="round"/>
+    <rect x="452" y="240" width="400" height="620" rx="170" fill="none" stroke="#07122E" stroke-width="168" stroke-linejoin="round"/>
+    <rect x="452" y="240" width="400" height="620" rx="170" fill="none" stroke="url(#tealLoop)" stroke-width="128" stroke-linejoin="round"/>
+    <rect x="1.5" y="1.5" width="1021" height="1021" rx="230.5" fill="none" stroke="#FFFFFF" stroke-opacity="0.141176" stroke-width="3"/>
+  </g>
+</svg>
